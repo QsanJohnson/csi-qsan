@@ -1,0 +1,21 @@
+kind: Pod
+apiVersion: v1
+metadata:
+  name: test-pod-block
+spec:
+  containers:
+  - image: busybox
+    command: ["/bin/sh", "-c"]
+    args: [ "tail -f /dev/null" ]
+    name: test-container
+    securityContext:
+      privileged: true
+      capabilities:
+        add: ["SYS_ADMIN"]
+    volumeDevices:
+      - name: vol
+        devicePath: /dev/sdx
+  volumes:
+    - name: vol
+      persistentVolumeClaim:
+        claimName: qsan-csi-pvc-block

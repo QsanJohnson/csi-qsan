@@ -1,0 +1,35 @@
+apiVersion: v1
+kind: Secret
+metadata:
+  name: iscsi-secret
+  namespace: qsan
+type: Opaque
+data:
+  username: am9obnNvbg==     # johnson
+  password: MTExMTIyMjIzMzMz # 111122223333
+
+---
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: qsan-xevo-storage-ex
+provisioner: xevo.csi.qsan.com
+parameters:
+  protocol: iscsi
+  server: 192.168.217.201
+  poolId: "2078286231"
+  blocksize: "4096"
+  capabilities: "3"
+  bgioPriority: HIGH
+  ioPriority: HIGH
+  targetRespmTime: "50"
+  maxIOPS: "1000"
+  maxThroughputKB: "200"
+  iscsiPortals: 192.168.217.236
+  iscsiTargets: iqn.2004-08.com.qsan:xs3316-000ec9aed:dev4.ctr2
+  csi.storage.k8s.io/node-stage-secret-name: iscsi-secret
+  csi.storage.k8s.io/node-stage-secret-namespace: qsan
+  csi.storage.k8s.io/fstype: ext4
+reclaimPolicy: Delete
+allowVolumeExpansion: true
+volumeBindingMode: Immediate

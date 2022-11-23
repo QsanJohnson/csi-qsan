@@ -1,0 +1,9 @@
+storageArrays:
+- server: 192.168.206.156
+  port: 80
+  https: false
+  username: admin
+  password: 1234
+- server: 192.168.217.201
+  username: admin
+  password: 1234

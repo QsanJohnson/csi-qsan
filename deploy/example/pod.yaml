@@ -1,0 +1,16 @@
+kind: Pod
+apiVersion: v1
+metadata:
+  name: test-pod
+spec:
+  containers:
+  - image: busybox
+    command: ["sleep", "99999999"]
+    name: test-container
+    volumeMounts:
+    - mountPath: /test-pv
+      name: test-pv-storage
+  volumes:
+    - name: test-pv-storage
+      persistentVolumeClaim:
+        claimName: qsan-csi-pvc

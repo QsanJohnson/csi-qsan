@@ -1,0 +1,23 @@
+[Deploy mysql client, and operate database]
+
+# kubectl run -it --rm --image=mysql:5.7 --restart=Never mysql-client -- mysql -h mysql -ppassword
+
+mysql> use mysql
+Database changed
+
+mysql> create table qsan( id int(4), name varchar(30) );
+Query OK, 0 rows affected (0.07 sec)
+
+mysql> insert qsan values( 27, "Johnson" );
+Query OK, 1 row affected (0.01 sec)
+
+mysql> select * from qsan;
++------+---------+
+| id   | name    |
++------+---------+
+|   27 | Johnson |
++------+---------+
+1 row in set (0.00 sec)
+
+mysql> exit
+Bye
