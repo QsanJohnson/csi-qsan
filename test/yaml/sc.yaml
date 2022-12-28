@@ -1,0 +1,12 @@
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: qtest-xevo-storage
+provisioner: xevo.csi.qsan.com
+parameters:
+  protocol: iscsi
+  server: 192.168.218.201
+  pool: Pool_Johnson
+  iscsiPortals: 192.168.218.99
+  iscsiTargets: iqn.2004-08.com.qsan:xs3316-abc:dev2.ctr2
+allowVolumeExpansion: true
