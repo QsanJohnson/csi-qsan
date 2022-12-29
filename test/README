@@ -1,14 +1,16 @@
 [usage]
 Method1: Use go test
-# go test -v -timeout 3600s
+# go test -timeout 3600s
 
 Method2: Use go run main utility
-# go run test.go test
+# go run test.go start
 # go run test.go clean
 
 Method3: Use go binary utility
-# ./bin/qtest test
-# ./bin/qtest clean
+# ./bin/test start
+# ./bin/test clean
+
+Note: Remember to modify qsan-auth.yaml before testing.
 
 
 [Test Scope]

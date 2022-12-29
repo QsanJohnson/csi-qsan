@@ -175,10 +175,10 @@ func TestExpansion() error {
 		return fmt.Errorf("kubectl patch pvc pvc-rwm-file-rw failed. err: %v\n", err)
 	}
 
+	retries := 0
 RETRY1:
 	fmt.Println("Sleep 3 seconds")
 	time.Sleep(3 * time.Second)
-	retries := 0
 	out, err := execCmd("kubectl get pvc pvc-extend -n qtest -o jsonpath='{.spec.resources.requests.storage}'")
 	if err != nil {
 		return fmt.Errorf("wait failed, err: %v\n", err)
@@ -197,8 +197,8 @@ RETRY1:
 
 	fmt.Println("\nSleep 60 seconds")
 	time.Sleep(60 * time.Second)
-RETRY2:
 	retries = 0
+RETRY2:
 	out, err = execCmd("kubectl exec test-pod -n qtest -- df -h /pvc-rwm-file-rw | grep pvc-rwm-file-rw | awk '{print $2}'")
 	if err != nil {
 		return fmt.Errorf("wait failed, err: %v\n", err)
@@ -240,7 +240,15 @@ func TestWebService() error {
 
 	ip := getMasterIp()
 	fmt.Println("Check web service")
+	retries := 0
+RETRY:
 	if out, err := getWebData(ip + ":30009"); err != nil {
+		if retries < 10 {
+			fmt.Printf("%v. Sleep 3 seconds then try again!\n", err)
+			retries++
+			time.Sleep(3 * time.Second)
+			goto RETRY
+		}
 		return fmt.Errorf("Failed to get web service data. err: %v\n", err)
 	} else {
 		if out != "TEST1" {
