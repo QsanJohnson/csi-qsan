@@ -11,6 +11,8 @@ import (
 	"time"
 )
 
+var csi_exist bool
+
 func usage(prog_name string) {
 	if strings.HasPrefix(prog_name, "/tmp/go-build") {
 		fmt.Println("Usage: go run test.go [start|clean]")
@@ -72,6 +74,12 @@ func main() {
 
 func DeployCSIDriver() error {
 	fmt.Println("[DeployCSIDriver]")
+
+	if _, err := execCmd("kubectl wait pods -l app=xevo-csi-controller -n qsan --for=condition=Ready --timeout=600s 2>/dev/null"); err == nil {
+		fmt.Printf("CSI Driver was already deployed\n\n")
+		csi_exist = true
+		return nil
+	}
 
 	fmt.Println("Install CSI Driver")
 	if _, err := execCmd("../deploy/install.sh"); err != nil {
@@ -284,10 +292,12 @@ func Cleanup() error {
 		return fmt.Errorf("Delete sc.yaml failed. err: %v\n", err)
 	}
 
-	fmt.Println("Uninstall CSI Driver")
-	if _, err := execCmd("../deploy/uninstall.sh"); err != nil {
-		// fmt.Printf("uninstall.sh failed\n")
-		return fmt.Errorf("uninstall.sh failed\n")
+	if !csi_exist {
+		fmt.Println("Uninstall CSI Driver")
+		if _, err := execCmd("../deploy/uninstall.sh"); err != nil {
+			// fmt.Printf("uninstall.sh failed\n")
+			return fmt.Errorf("uninstall.sh failed\n")
+		}
 	}
 
 	return nil

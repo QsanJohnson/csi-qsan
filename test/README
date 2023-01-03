@@ -28,6 +28,7 @@ Test elapsed time
 
 [Test Flow]
 * Deploy CSI Driver
+  Deploy CSI driver if not exists
 * Deploy StorageClass
 * Deploy test pod
 * Test Access
@@ -52,4 +53,4 @@ Test elapsed time
   Delete nginx pvc if exists
   Delete test pod if exists
   Delete StorageClass if exists
-  Uninstall CSI Driver
+  Uninstall CSI Driver if deployed before
