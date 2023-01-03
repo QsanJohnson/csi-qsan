@@ -6,7 +6,7 @@ provisioner: xevo.csi.qsan.com
 parameters:
   protocol: iscsi
   server: 192.168.217.201
-  poolId: "2078286231"
+  pool: Pool_Johnson
   iscsiPortals: 192.168.217.236
   iscsiTargets: iqn.2004-08.com.qsan:xs3316-000ec9aed:dev3.ctr2
 allowVolumeExpansion: true

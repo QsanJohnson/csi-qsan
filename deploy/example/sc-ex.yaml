@@ -17,7 +17,7 @@ provisioner: xevo.csi.qsan.com
 parameters:
   protocol: iscsi
   server: 192.168.217.201
-  poolId: "2078286231"
+  pool: Pool_Johnson
   blocksize: "4096"
   capabilities: "3"
   bgioPriority: HIGH

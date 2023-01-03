@@ -93,6 +93,8 @@ spec:
           args:
             - -v=5
             - -csi-address=/csi/csi.sock
+            - "--leader-election"
+            - "--leader-election-namespace=qsan"
           securityContext:
             privileged: true
           volumeMounts:
