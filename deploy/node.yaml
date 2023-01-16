@@ -79,11 +79,12 @@ spec:
             capabilities:
               add: ["SYS_ADMIN"]
             allowPrivilegeEscalation: true
-          image: johnsoncheng0210/qsan-xevo-csi:v1.0.0
+          image: qsandocker/qsan-xevo-csi:v1.0.0-b2
           imagePullPolicy: Always
           args:
             - "-v=4"
             - "--nodeid=$(NODE_ID)"
+            - "--nodeip=$(NODE_IP)"
             - "--endpoint=$(CSI_ENDPOINT)"
             - "--secret-file=/etc/qsan/qsan-auth.yaml"
           env:
@@ -91,6 +92,10 @@ spec:
               valueFrom:
                 fieldRef:
                   fieldPath: spec.nodeName
+            - name: NODE_IP
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.hostIP
             - name: CSI_ENDPOINT
               value: unix:///csi/csi.sock
           ports:
