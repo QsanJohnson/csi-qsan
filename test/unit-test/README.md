@@ -1,32 +1,39 @@
-[usage]
+## usage
 Method1: Use go test
+```
 # go test -timeout 3600s
+```
 
 Method2: Use go run main utility
+```
 # go run test.go start
 # go run test.go clean
+```
 
 Method3: Use go binary utility
+```
 # ./bin/test start
 # ./bin/test clean
+```
 
 Note: Remember to modify qsan-auth.yaml before testing.
 
 
-[Test Scope]
+## Test Scope
 Namespace: qtest
 StorageClass: qtest-xevo-storage
 Scope:
-  ReadWriteMany with rw/ro
-  ReadWriteOnce with rw/ro
-  ReadWriteMany block device  (using dd)
-  ReadWriteOnce block device (using mke2fs)
-  Online & offline volume expansion
-  Web service with StatefulSet
+> ReadWriteMany with rw/ro
+> ReadWriteOnce with rw/ro
+> ReadWriteMany block device  (using dd)
+> ReadWriteOnce block device (using mke2fs)
+> Online & offline volume expansion
+> Web service with StatefulSet
+
 Test elapsed time
 
 
-[Test Flow]
+## Test Flow
 * Deploy CSI Driver
   Deploy CSI driver if not exists
 * Deploy StorageClass
@@ -54,3 +61,4 @@ Test elapsed time
   Delete test pod if exists
   Delete StorageClass if exists
   Uninstall CSI Driver if deployed before
+  
