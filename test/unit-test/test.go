@@ -82,7 +82,7 @@ func DeployCSIDriver() error {
 	}
 
 	fmt.Println("Install CSI Driver")
-	if _, err := execCmd("../deploy/install.sh"); err != nil {
+	if _, err := execCmd("../../deploy/install.sh"); err != nil {
 		return fmt.Errorf("intall.sh failed.\n")
 	}
 
@@ -294,7 +294,7 @@ func Cleanup() error {
 
 	if !csi_exist {
 		fmt.Println("Uninstall CSI Driver")
-		if _, err := execCmd("../deploy/uninstall.sh"); err != nil {
+		if _, err := execCmd("../../deploy/uninstall.sh"); err != nil {
 			// fmt.Printf("uninstall.sh failed\n")
 			return fmt.Errorf("uninstall.sh failed\n")
 		}
