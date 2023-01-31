@@ -79,7 +79,7 @@ spec:
             capabilities:
               add: ["SYS_ADMIN"]
             allowPrivilegeEscalation: true
-          image: qsandocker/qsan-xevo-csi:v1.0.0-b2
+          image: johnsoncheng0210/qsan-xevo-csi:latest
           imagePullPolicy: Always
           args:
             - "-v=4"
