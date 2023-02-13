@@ -4,6 +4,6 @@ storageArrays:
   https: false
   username: admin
   password: 1234
-- server: 192.168.217.201
+- server: 192.168.201.85
   username: admin
   password: 1234

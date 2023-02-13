@@ -1,4 +1,3 @@
----
 kind: Deployment
 apiVersion: apps/v1
 metadata:
@@ -100,16 +99,6 @@ spec:
           volumeMounts:
             - mountPath: /csi
               name: socket-dir
-        # - name: csi-snapshotter
-        #   image: k8s.gcr.io/sig-storage/csi-snapshotter:v5.0.1
-        #   args:
-        #     - -v=5
-        #     - --csi-address=/csi/csi.sock
-        #   securityContext:
-        #     privileged: true
-        #   volumeMounts:
-        #     - mountPath: /csi
-        #       name: socket-dir
         - name: csi-external-health-monitor-controller
           image: k8s.gcr.io/sig-storage/csi-external-health-monitor-controller:v0.7.0
           args:
@@ -127,7 +116,7 @@ spec:
             - name: socket-dir
               mountPath: /csi
         - name: driver
-          image: johnsoncheng0210/qsan-xevo-csi:latest
+          image: qsandocker/qsan-xevo-csi:v1.0.0-latest
           securityContext:
             privileged: true
             capabilities:

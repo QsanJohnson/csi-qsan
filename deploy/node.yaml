@@ -1,4 +1,3 @@
----
 kind: DaemonSet
 apiVersion: apps/v1
 metadata:
@@ -79,7 +78,7 @@ spec:
             capabilities:
               add: ["SYS_ADMIN"]
             allowPrivilegeEscalation: true
-          image: johnsoncheng0210/qsan-xevo-csi:latest
+          image: qsandocker/qsan-xevo-csi:v1.0.0-latest
           imagePullPolicy: Always
           args:
             - "-v=4"
@@ -160,7 +159,6 @@ spec:
         - name: host-dev
           hostPath:
             path: /dev
-            #type: Directory
         - name: host-root
           hostPath:
             path: /
