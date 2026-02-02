@@ -4,7 +4,7 @@ metadata:
   name: xevo-csi-controller
   namespace: qsan
 spec:
-  replicas: 2
+  replicas: 1
   selector:
     matchLabels:
       app: xevo-csi-controller
@@ -36,7 +36,7 @@ spec:
           tolerationSeconds: 30
       containers:
         - name: csi-provisioner
-          image: registry.k8s.io/sig-storage/csi-provisioner:v3.3.0
+          image: registry.k8s.io/sig-storage/csi-provisioner:v3.6.0
           args:
             - "-v=5"
             - "--csi-address=$(ADDRESS)"
@@ -53,14 +53,8 @@ spec:
           volumeMounts:
             - mountPath: /csi
               name: socket-dir
-          resources:
-            limits:
-              memory: 400Mi
-            requests:
-              cpu: 10m
-              memory: 20Mi
         - name: liveness-probe
-          image: registry.k8s.io/sig-storage/livenessprobe:v2.8.0
+          image: registry.k8s.io/sig-storage/livenessprobe:v2.12.0
           args:
             - --csi-address=/csi/csi.sock
             - --probe-timeout=3s
@@ -69,38 +63,34 @@ spec:
           volumeMounts:
             - name: socket-dir
               mountPath: /csi
-          resources:
-            limits:
-              memory: 100Mi
-            requests:
-              cpu: 10m
-              memory: 20Mi
         - name: csi-attacher
-          image: k8s.gcr.io/sig-storage/csi-attacher:v4.0.0
+          image: registry.k8s.io/sig-storage/csi-attacher:v4.4.0
           args:
             - --v=5
             - --csi-address=/csi/csi.sock
             - "--leader-election"
             - "--leader-election-namespace=qsan"
+            - "--timeout=120s"
           securityContext:
             privileged: true
           volumeMounts:
           - mountPath: /csi
             name: socket-dir
         - name: csi-resizer
-          image: k8s.gcr.io/sig-storage/csi-resizer:v1.6.0
+          image: registry.k8s.io/sig-storage/csi-resizer:v1.9.0
           args:
             - -v=5
             - -csi-address=/csi/csi.sock
             - "--leader-election"
             - "--leader-election-namespace=qsan"
+            - "--timeout=60s"
           securityContext:
             privileged: true
           volumeMounts:
             - mountPath: /csi
               name: socket-dir
         - name: csi-external-health-monitor-controller
-          image: k8s.gcr.io/sig-storage/csi-external-health-monitor-controller:v0.7.0
+          image: registry.k8s.io/sig-storage/csi-external-health-monitor-controller:v0.10.0
           args:
             - "--v=5"
             - "--csi-address=$(ADDRESS)"
@@ -115,8 +105,20 @@ spec:
           volumeMounts:
             - name: socket-dir
               mountPath: /csi
+        - name: csi-snapshotter
+          image: registry.k8s.io/sig-storage/csi-snapshotter:v6.3.0
+          args:
+            - -v=5
+            - --csi-address=/csi/csi.sock
+            - "--leader-election"
+            - "--leader-election-namespace=qsan"
+          securityContext:
+            privileged: true
+          volumeMounts:
+            - mountPath: /csi
+              name: socket-dir
         - name: driver
-          image: qsandocker/qsan-xevo-csi:v1.0.0-latest
+          image: hub.qsan.com/csi/qsan-xevo-csi:v1.4.0-dev
           securityContext:
             privileged: true
             capabilities:
@@ -124,7 +126,7 @@ spec:
             allowPrivilegeEscalation: true
           imagePullPolicy: Always
           args:
-            - "-v=4"
+            - "-v=3"
             - "--nodeid=$(NODE_ID)"
             - "--nodeip=$(NODE_IP)"
             - "--endpoint=$(CSI_ENDPOINT)"
@@ -160,12 +162,6 @@ spec:
               name: socket-dir
             - name: qsan-auth
               mountPath: /etc/qsan
-          resources:
-            limits:
-              memory: 200Mi
-            requests:
-              cpu: 10m
-              memory: 20Mi
       volumes:
         - name: pods-mount-dir
           hostPath:

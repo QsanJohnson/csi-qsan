@@ -1,0 +1,28 @@
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: qsan-xevo-storage-topol2
+provisioner: xevo.csi.qsan.com
+parameters:
+  protocol: "iscsi"
+  server: 192.168.217.201
+  pool: Pool_Johnson
+  blocksize: "4096"
+  capabilities: "3"
+  ioPriority: "HIGH"
+  bgioPriority: "HIGH"
+  iscsiPortals: "192.168.217.236"
+  iscsiTargets: "iqn.2004-08.com.qsan:xs3316-000ec9aed:dev2.ctr2"
+  csi.storage.k8s.io/fstype: xfs
+reclaimPolicy: Delete
+allowVolumeExpansion: true
+volumeBindingMode: Immediate
+mountOptions:
+  - hard
+  - nfsvers=3
+  - nolock
+allowedTopologies:
+  - matchLabelExpressions:
+    - key: topology.kubernetes.io/zone
+      values:
+      - "Taipei"

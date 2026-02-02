@@ -10,28 +10,12 @@ func TestMain(t *testing.T) {
 	startTime := time.Now()
 	fmt.Println("Start Time: ", startTime.Format("2006-01-02 15:04:05"))
 
-	if err := DeployCSIDriver(); err != nil {
-		t.Fatalf("DeployCSIDriver failed. err: %v", err)
-	}
-
-	if err := DeployStorageClass(); err != nil {
-		t.Fatalf("DeployStorageClass failed. err: %v", err)
-	}
-
-	if err := DeployPod(); err != nil {
-		t.Fatalf("DeployPod failed. err: %v", err)
-	}
-
-	if err := TestAccess(); err != nil {
-		t.Errorf("TestAccess failed. err: %v", err)
-	}
-
-	if err := TestExpansion(); err != nil {
-		t.Errorf("TestExpansion failed. err: %v", err)
-	}
-
-	if err := TestWebService(); err != nil {
-		t.Errorf("TestWebService failed. err: %v", err)
+	for _, test := range tests {
+		start := time.Now()
+		if err := test.fnExec(); err != nil {
+			t.Fatalf("[%s] Test failed. err: %v", test.name, err)
+		}
+		fmt.Printf("========================================\n%s took %s\n\n", test.name, time.Since(start))
 	}
 
 	fmt.Println("\n\nSleep 60 seconds to start cleanup ...")

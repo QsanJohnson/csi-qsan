@@ -1,7 +1,7 @@
 kind: Pod
 apiVersion: v1
 metadata:
-  name: test-pod-block
+  name: test-pod-block2
 spec:
   containers:
   - image: busybox
@@ -19,4 +19,4 @@ spec:
   volumes:
     - name: vol
       persistentVolumeClaim:
-        claimName: qsan-csi-pvc-block
+        claimName: qsan-csi-pvc-block2

@@ -102,6 +102,7 @@ spec:
   - image: busybox
     command: ["sleep", "99999999"]
     name: test-container
+    imagePullPolicy: IfNotPresent
     volumeMounts:
       - mountPath: "/pvc-rwm-file-rw"
         name: pvc-rwm-file-rw

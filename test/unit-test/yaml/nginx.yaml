@@ -37,12 +37,22 @@ spec:
       containers:
       - name: nginx
         image: nginx
+        securityContext:
+          runAsUser: 0
+          runAsGroup: 0
         ports:
         - containerPort: 80
           name: web
         volumeMounts:
         - name: pvc-nginx
           mountPath: /usr/share/nginx/html
+        - name: nginx-conf
+          mountPath: /etc/nginx/nginx.conf
+          subPath: nginx.conf
+      volumes:
+        - name: nginx-conf
+          configMap:
+            name: nginx-conf
   volumeClaimTemplates:
   - metadata:
       name: pvc-nginx
@@ -52,4 +62,37 @@ spec:
       resources:
         requests:
           storage: 20Gi
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: nginx-conf
+  namespace: qtest
+data:
+  nginx.conf: |
+    user root;
+    worker_processes auto;
+
+    events {
+      worker_connections 1024;
+    }
+
+    http {
+      include       /etc/nginx/mime.types;
+      default_type  application/octet-stream;
+
+      sendfile        on;
+      keepalive_timeout  65;
+
+      server {
+        listen 80;
+        server_name localhost;
+
+        location / {
+          root   /usr/share/nginx/html;
+          index  index.html;
+        }
+      }
+    }
 

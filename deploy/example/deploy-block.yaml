@@ -1,0 +1,44 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: qsan-csi-pvc-block-deploy
+spec:
+  volumeMode: Block
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 10Gi
+  storageClassName: qsan-xevo-storage
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: test-block-deploy
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: nginx
+  template:
+    metadata:
+      labels:
+        app: nginx
+    spec:
+      containers:
+      - image: busybox
+        command: ["/bin/sh", "-c"]
+        args: [ "tail -f /dev/null" ]
+        name: test-container
+        securityContext:
+          privileged: true
+          capabilities:
+            add: ["SYS_ADMIN"]
+        volumeDevices:
+          - name: vol
+            devicePath: /dev/sdx
+      volumes:
+      - name: vol
+        persistentVolumeClaim:
+          claimName: qsan-csi-pvc-block-deploy

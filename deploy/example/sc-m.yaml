@@ -5,8 +5,8 @@ metadata:
 provisioner: xevo.csi.qsan.com
 parameters:
   protocol: iscsi
-  server: 192.168.201.85
+  server: 192.168.213.85
   pool: Pool_Johnson
-  iscsiPortals: 192.168.201.202
-  iscsiTargets: iqn.2004-08.com.qsan:xs5312-000d5b3a0:dev2.ctr1
+  iscsiPortals: 192.168.213.202,192.168.213.200
+  target: HostGroup_Johnson
 allowVolumeExpansion: true

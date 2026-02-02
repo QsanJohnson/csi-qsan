@@ -1,0 +1,32 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: restore-source-pvc
+  namespace: qtest
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 10Gi
+  storageClassName: qtest-xevo-storage
+
+---
+kind: Pod
+apiVersion: v1
+metadata:
+  name: restore-source-pod
+  namespace: qtest
+spec:
+  containers:
+  - image: busybox
+    command: ["sleep", "99999999"]
+    name: test-container
+    volumeMounts:
+    - mountPath: /test-pv
+      name: test-pv-storage
+  volumes:
+    - name: test-pv-storage
+      persistentVolumeClaim:
+        claimName: restore-source-pvc
+

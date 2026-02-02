@@ -1,0 +1,13 @@
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: qsan-xevo-storage
+  annotations:
+    storageclass.kubernetes.io/is-default-class: "true"
+provisioner: xevo.csi.qsan.com
+parameters:
+  protocol: nfs
+  server: 192.168.213.85
+  pool: Pool_01
+  target: ShareHostGroup_002
+allowVolumeExpansion: true

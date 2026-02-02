@@ -1,0 +1,14 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: qsan-csi-pvc-clone
+spec:
+  storageClassName: qsan-xevo-storage
+  dataSource:
+    name: qsan-csi-pvc
+    kind: PersistentVolumeClaim
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 10Gi

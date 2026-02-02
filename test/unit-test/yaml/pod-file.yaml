@@ -1,0 +1,133 @@
+kind: PersistentVolumeClaim
+apiVersion: v1
+metadata:
+  name: pvc-extend
+  namespace: qtest
+spec:
+  accessModes:
+    - ReadWriteMany
+  resources:
+    requests:
+      storage: 5Gi
+  storageClassName: qtest-xevo-storage
+---
+kind: PersistentVolumeClaim
+apiVersion: v1
+metadata:
+  name: pvc-rwm-file-rw
+  namespace: qtest
+spec:
+  accessModes:
+    - ReadWriteMany
+  resources:
+    requests:
+      storage: 6Gi
+  storageClassName: qtest-xevo-storage
+---
+kind: PersistentVolumeClaim
+apiVersion: v1
+metadata:
+  name: pvc-rwm-file-ro
+  namespace: qtest
+spec:
+  accessModes:
+    - ReadWriteMany
+  resources:
+    requests:
+      storage: 7Gi
+  storageClassName: qtest-xevo-storage
+---
+kind: PersistentVolumeClaim
+apiVersion: v1
+metadata:
+  name: pvc-rwm-block
+  namespace: qtest
+spec:
+  accessModes:
+    - ReadWriteMany
+  volumeMode: Block
+  resources:
+    requests:
+      storage: 8Gi
+  storageClassName: qtest-xevo-storage
+---
+kind: PersistentVolumeClaim
+apiVersion: v1
+metadata:
+  name: pvc-rwo-file-rw
+  namespace: qtest
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 9Gi
+  storageClassName: qtest-xevo-storage
+---
+kind: PersistentVolumeClaim
+apiVersion: v1
+metadata:
+  name: pvc-rwo-file-ro
+  namespace: qtest
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 10Gi
+  storageClassName: qtest-xevo-storage
+---
+kind: PersistentVolumeClaim
+apiVersion: v1
+metadata:
+  name: pvc-rwo-block
+  namespace: qtest
+spec:
+  accessModes:
+    - ReadWriteOnce
+  volumeMode: Block
+  resources:
+    requests:
+      storage: 11Gi
+  storageClassName: qtest-xevo-storage
+
+---
+kind: Pod
+apiVersion: v1
+metadata:
+  name: test-pod
+  namespace: qtest
+spec:
+  containers:
+  - image: busybox
+    command: ["sleep", "99999999"]
+    name: test-container
+    imagePullPolicy: IfNotPresent
+    volumeMounts:
+      - mountPath: "/pvc-rwm-file-rw"
+        name: pvc-rwm-file-rw
+      - mountPath: "/pvc-rwm-file-ro"
+        name: pvc-rwm-file-ro
+        readOnly: true
+      - mountPath: "/pvc-rwo-file-rw"
+        name: pvc-rwo-file-rw
+      - mountPath: "/pvc-rwo-file-ro"
+        name: pvc-rwo-file-ro
+        readOnly: true
+    securityContext:
+      privileged: true
+      capabilities:
+        add: ["SYS_ADMIN"]
+  volumes:
+    - name: pvc-rwm-file-rw
+      persistentVolumeClaim:
+        claimName: pvc-rwm-file-rw
+    - name: pvc-rwm-file-ro
+      persistentVolumeClaim:
+        claimName: pvc-rwm-file-ro
+    - name: pvc-rwo-file-rw
+      persistentVolumeClaim:
+        claimName: pvc-rwo-file-rw
+    - name: pvc-rwo-file-ro
+      persistentVolumeClaim:
+        claimName: pvc-rwo-file-ro

@@ -1,0 +1,107 @@
+kind: DaemonSet
+apiVersion: apps/v1
+metadata:
+  name: xevo-csi-node-win
+  namespace: qsan
+spec:
+  updateStrategy:
+    rollingUpdate:
+      maxUnavailable: 1
+    type: RollingUpdate
+  selector:
+    matchLabels:
+      app: xevo-csi-node
+  template:
+    metadata:
+      labels:
+        app: xevo-csi-node
+    spec:
+      hostNetwork: true  # original nfs connection would be broken without hostNetwork setting
+      dnsPolicy: Default  # available values: Default, ClusterFirstWithHostNet, ClusterFirst
+      serviceAccountName: xevo-csi-node-sa
+      nodeSelector:
+        kubernetes.io/os: linux
+      tolerations:
+        - operator: "Exists"
+      containers:
+        - name: node-driver-registrar
+          image: registry.k8s.io/sig-storage/csi-node-driver-registrar:v2.5.1
+          args:
+            - "--v=5"
+            - "--csi-address=unix://C:\\csi\\csi.sock"
+            - "--kubelet-registration-path=C:\\var\\lib\\kubelet\\plugins\\pd.csi.storage.gke.io\\csi.sock"
+          env:
+            - name: KUBE_NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+          volumeMounts:
+            - name: plugin-dir
+              mountPath: C:\csi
+            - name: registration-dir
+              mountPath: C:\registration
+        - name: driver
+          securityContext:
+            privileged: true
+            capabilities:
+              add: ["SYS_ADMIN"]
+            allowPrivilegeEscalation: true
+          #image: qsandocker/qsan-xevo-csi:v1.0.0-b2
+          image: johnsoncheng0210/qsan-xevo-csi:latest
+          imagePullPolicy: Always
+          args:
+            - "-v=4"
+            - "--nodeid=$(NODE_ID)"
+            - "--nodeip=$(NODE_IP)"
+            - "--endpoint=unix:/csi/csi.sock"
+            - "--secret-file=/etc/qsan/qsan-auth.yaml"
+          env:
+            - name: NODE_ID
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+            - name: NODE_IP
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.hostIP
+          #imagePullPolicy: "IfNotPresent"
+          volumeMounts:
+            - name: kubelet-dir
+              mountPath: C:\var\lib\kubelet
+            - name: plugin-dir
+              mountPath: C:\csi
+            - name: csi-proxy-disk-pipe
+              mountPath: \\.\pipe\csi-proxy-disk-v1
+            - name: csi-proxy-volume-pipe
+              mountPath: \\.\pipe\csi-proxy-volume-v1
+            - name: csi-proxy-filesystem-pipe
+              mountPath: \\.\pipe\csi-proxy-filesystem-v1
+            # - name: qsan-auth
+            #   mountPath: /etc/qsan
+            #   readOnly: true
+      volumes:
+        - name: csi-proxy-disk-pipe
+          hostPath:
+            path: \\.\pipe\csi-proxy-disk-v1
+            type: ""
+        - name: csi-proxy-volume-pipe
+          hostPath:
+            path: \\.\pipe\csi-proxy-volume-v1
+            type: ""
+        - name: csi-proxy-filesystem-pipe
+          hostPath:
+            path: \\.\pipe\csi-proxy-filesystem-v1
+            type: ""
+        - name: registration-dir
+          hostPath:
+            path: C:\var\lib\kubelet\plugins_registry\
+            type: Directory
+        - name: kubelet-dir
+          hostPath:
+            path: C:\var\lib\kubelet\
+            type: Directory
+        - name: plugin-dir
+          hostPath:
+            path: C:\var\lib\kubelet\plugins\csi.org.io\
+            type: DirectoryOrCreate
+
