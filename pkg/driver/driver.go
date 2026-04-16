@@ -69,7 +69,7 @@ type Driver struct {
 }
 
 const (
-	DefaultDriverName     = "xevo.csi.qsan.com"
+	DefaultDriverName     = "csi.qsan.com"
 	DefaultIscsiPort      = 3260
 	DefaultIscsiTimeout   = 5000
 	DefaultFsType         = "ext4"
@@ -100,7 +100,8 @@ const (
 	protocolNFS   = "nfs"
 )
 
-var supportProtocols = []string{protocolISCSI, protocolFC, protocolNFS}
+// var supportProtocols = []string{protocolISCSI, protocolFC, protocolNFS}
+var supportProtocols = []string{protocolNFS}
 var supportFsTypes = []string{"ext3", "ext4", "xfs"}
 var supportNfsVers = []string{"3", "4", "4.0", "4.1", "4.2"}
 var supportKrb5Sec = []string{"krb5", "krb5i", "krb5p"}

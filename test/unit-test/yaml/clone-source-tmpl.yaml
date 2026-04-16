@@ -9,7 +9,7 @@ spec:
   resources:
     requests:
       storage: 10Gi
-  storageClassName: qtest-xevo-storage
+  storageClassName: qtest-qsan-storage
 
 ---
 kind: Pod

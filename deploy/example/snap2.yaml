@@ -3,6 +3,6 @@ kind: VolumeSnapshot
 metadata:
   name: qsan-csi-pvc-snap2
 spec:
-  volumeSnapshotClassName: qsan-xevo-snapclass
+  volumeSnapshotClassName: qsan-snapclass
   source:
     persistentVolumeClaimName: qsan-csi-pvc

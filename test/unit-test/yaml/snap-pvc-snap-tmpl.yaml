@@ -4,6 +4,6 @@ metadata:
   name: testsnap-pvc-snap%d
   namespace: qtest
 spec:
-  volumeSnapshotClassName: qtest-xevo-snapclass
+  volumeSnapshotClassName: qtest-qsan-snapclass
   source:
     persistentVolumeClaimName: testsnap-pvc

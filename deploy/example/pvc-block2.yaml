@@ -9,4 +9,4 @@ spec:
   resources:
     requests:
       storage: 12Gi
-  storageClassName: qsan-xevo-storage
+  storageClassName: qsan-storage

@@ -9,4 +9,4 @@ spec:
   resources:
     requests:
       storage: 10000000000
-  storageClassName: qtest-xevo-storage
+  storageClassName: qtest-qsan-storage

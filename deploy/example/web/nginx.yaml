@@ -8,7 +8,7 @@ spec:
   resources:
     requests:
       storage: 20Gi
-  storageClassName: qsan-xevo-storage
+  storageClassName: qsan-storage
 
 ---
 apiVersion: v1

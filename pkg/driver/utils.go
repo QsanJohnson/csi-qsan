@@ -257,7 +257,7 @@ func showMountFsSize(mountPoint string) {
 
 	// The below is an output example,
 	// Filesystem                    1K-blocks  Used Available Use% Mounted on
-	// /dev/mapper/32bb30013781126c0  10218772    24  10202364   1% /var/lib/kubelet/plugins/kubernetes.io/csi/xevo.csi.qsan.com/3e1ff781457f3ccef786eb619218e8ece0ccc7e89326f0744a910e44828f653a/globalmount
+	// /dev/mapper/32bb30013781126c0  10218772    24  10202364   1% /var/lib/kubelet/plugins/kubernetes.io/csi/csi.qsan.com/3e1ff781457f3ccef786eb619218e8ece0ccc7e89326f0744a910e44828f653a/globalmount
 	fields := strings.Fields(lines[1])
 	if len(fields) < 4 {
 		klog.Warningf("[showMountFsSize] Unable to parse df output.")

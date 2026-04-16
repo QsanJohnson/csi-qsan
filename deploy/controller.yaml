@@ -1,21 +1,21 @@
 kind: Deployment
 apiVersion: apps/v1
 metadata:
-  name: xevo-csi-controller
+  name: qsan-csi-controller
   namespace: qsan
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app: xevo-csi-controller
+      app: qsan-csi-controller
   template:
     metadata:
       labels:
-        app: xevo-csi-controller
+        app: qsan-csi-controller
     spec:
       hostNetwork: true  # controller also needs to mount nfs to create dir
       dnsPolicy: Default  # available values: Default, ClusterFirstWithHostNet, ClusterFirst
-      serviceAccountName: xevo-csi-controller-sa
+      serviceAccountName: qsan-csi-controller-sa
       nodeSelector:
         kubernetes.io/os: linux  # add "kubernetes.io/role: master" to run controller on master node
       priorityClassName: system-cluster-critical
@@ -95,7 +95,7 @@ spec:
             - "--v=5"
             - "--csi-address=$(ADDRESS)"
             - "--leader-election"
-            - "--http-endpoint=:8080"
+            - "--http-endpoint=:18080"
             - "--enable-node-watcher=true"
             - "--timeout=60s"
           env:
@@ -118,7 +118,7 @@ spec:
             - mountPath: /csi
               name: socket-dir
         - name: driver
-          image: hub.qsan.com/csi/qsan-xevo-csi:v1.4.0-dev
+          image: qsandocker/qsan-csi:v1.5.0-dev
           securityContext:
             privileged: true
             capabilities:
@@ -157,7 +157,6 @@ spec:
           volumeMounts:
             - name: pods-mount-dir
               mountPath: /var/lib/kubelet/pods
-              mountPropagation: "Bidirectional"
             - mountPath: /csi
               name: socket-dir
             - name: qsan-auth

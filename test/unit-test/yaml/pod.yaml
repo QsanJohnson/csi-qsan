@@ -9,7 +9,7 @@ spec:
   resources:
     requests:
       storage: 5Gi
-  storageClassName: qtest-xevo-storage
+  storageClassName: qtest-qsan-storage
 ---
 kind: PersistentVolumeClaim
 apiVersion: v1
@@ -22,7 +22,7 @@ spec:
   resources:
     requests:
       storage: 6Gi
-  storageClassName: qtest-xevo-storage
+  storageClassName: qtest-qsan-storage
 ---
 kind: PersistentVolumeClaim
 apiVersion: v1
@@ -35,7 +35,7 @@ spec:
   resources:
     requests:
       storage: 7Gi
-  storageClassName: qtest-xevo-storage
+  storageClassName: qtest-qsan-storage
 ---
 kind: PersistentVolumeClaim
 apiVersion: v1
@@ -49,7 +49,7 @@ spec:
   resources:
     requests:
       storage: 8Gi
-  storageClassName: qtest-xevo-storage
+  storageClassName: qtest-qsan-storage
 ---
 kind: PersistentVolumeClaim
 apiVersion: v1
@@ -62,7 +62,7 @@ spec:
   resources:
     requests:
       storage: 9Gi
-  storageClassName: qtest-xevo-storage
+  storageClassName: qtest-qsan-storage
 ---
 kind: PersistentVolumeClaim
 apiVersion: v1
@@ -75,7 +75,7 @@ spec:
   resources:
     requests:
       storage: 10Gi
-  storageClassName: qtest-xevo-storage
+  storageClassName: qtest-qsan-storage
 ---
 kind: PersistentVolumeClaim
 apiVersion: v1
@@ -89,7 +89,7 @@ spec:
   resources:
     requests:
       storage: 11Gi
-  storageClassName: qtest-xevo-storage
+  storageClassName: qtest-qsan-storage
 
 ---
 kind: Pod

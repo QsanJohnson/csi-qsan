@@ -1,10 +1,12 @@
 package driver
 
 import (
+	"errors"
 	"fmt"
 	"io/fs"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -508,8 +510,8 @@ func (ns *NodeServer) publishFilesystemVolume(ctx context.Context, req *csi.Node
 			fmt.Printf("failed to ListProcMounts for path %s, error: %v", stagingPath, err)
 		}
 		klog.Infof("[publishFilesystemVolume] stagingPath MountPoints: %+v \n", mps)
-		// Default: /var/lib/kubelet/plugins/kubernetes.io/csi/xevo.csi.qsan.com/xxxx/globalmount is mount to
-		// /host/var/lib/kubelet/plugins/kubernetes.io/csi/xevo.csi.qsan.com/xxxx/globalmount
+		// Default: /var/lib/kubelet/plugins/kubernetes.io/csi/csi.qsan.com/xxxx/globalmount is mount to
+		// /host/var/lib/kubelet/plugins/kubernetes.io/csi/csi.qsan.com/xxxx/globalmount
 		if len(mps) > 1 {
 			return nil, status.Error(codes.FailedPrecondition, "volume uses the ReadWriteOncePod access mode and is already in use by another pod")
 		}
@@ -535,11 +537,19 @@ func (ns *NodeServer) publishFilesystemVolume(ctx context.Context, req *csi.Node
 		}
 	}
 
+	isNFS := req.VolumeContext["protocol"] == protocolNFS
+	if isNFS {
+		notMnt, err = ns.hostNamespaceIsLikelyNotMountPoint(targetPath)
+		if err != nil {
+			return nil, status.Error(codes.Internal, fmt.Sprintf("check host mount point target path(%s): %v", targetPath, err))
+		}
+	}
+
 	if !notMnt {
 		return &csi.NodePublishVolumeResponse{}, nil
 	}
 
-	if req.VolumeContext["protocol"] == protocolNFS {
+	if isNFS {
 		options := req.GetVolumeCapability().GetMount().GetMountFlags()
 		if req.GetReadonly() ||
 			volCap.GetAccessMode().GetMode() == csi.VolumeCapability_AccessMode_MULTI_NODE_READER_ONLY {
@@ -549,8 +559,10 @@ func (ns *NodeServer) publishFilesystemVolume(ctx context.Context, req *csi.Node
 		preferSec := ""
 		sharePath := "/" + req.GetPublishContext()["shareName"]
 		filteredOptions := make([]string, 0, len(options))
+		hasNfsVers := false
 		for _, opt := range options {
 			if strings.HasPrefix(opt, "nfsvers=") {
+				hasNfsVers = true
 				ver := strings.TrimPrefix(opt, "nfsvers=")
 				if contains(supportNfsVers, ver) {
 					filteredOptions = append(filteredOptions, opt)
@@ -572,6 +584,11 @@ func (ns *NodeServer) publishFilesystemVolume(ctx context.Context, req *csi.Node
 			} else {
 				filteredOptions = append(filteredOptions, opt)
 			}
+		}
+		// default nfsvers=4.2 if not specified
+		if !hasNfsVers {
+			klog.Infof("[publishFilesystemVolume] nfsvers not specified, default to nfsvers=4.2")
+			filteredOptions = append(filteredOptions, "nfsvers=4.2")
 		}
 		options = filteredOptions
 
@@ -600,8 +617,8 @@ func (ns *NodeServer) publishFilesystemVolume(ctx context.Context, req *csi.Node
 
 		// Fallback to normal NFS mount
 		klog.Infof("[publishFilesystemVolume] NFS volumeID(%v) nfsPath(%s) targetPath(%s) mountflags(%v)", volumeID, nfsPath, targetPath, options)
-		if err := ns.mounter.Mount(nfsPath, targetPath, "nfs", options); err != nil {
-			return nil, status.Error(codes.Internal, fmt.Sprintf("failed to mount device: %s at %s: %s", stagingPath, targetPath, err.Error()))
+		if err := ns.hostNamespaceMount(nfsPath, targetPath, "nfs", options); err != nil {
+			return nil, status.Error(codes.Internal, fmt.Sprintf("failed to mount NFS share: %s at %s: %s", nfsPath, targetPath, err.Error()))
 		}
 
 	} else {
@@ -631,6 +648,23 @@ func (ns *NodeServer) NodeUnpublishVolume(ctx context.Context, req *csi.NodeUnpu
 
 	ns.mutex.Lock()
 	defer ns.mutex.Unlock()
+
+	if volData, err := ns.Driver.GetContextDataFromVolumeContextID(volumeID); err == nil && volData.protocol == protocolNFS {
+		notMnt, err := ns.hostNamespaceIsLikelyNotMountPoint(targetPath)
+		if err != nil {
+			return nil, status.Errorf(codes.Internal, "Check host targetPath(%s) mount point failed: %v", targetPath, err)
+		}
+		if notMnt {
+			klog.Infof("[NodeUnpublishVolume] targetPath(%s) is already unmounted in host namespace", targetPath)
+			return &csi.NodeUnpublishVolumeResponse{}, nil
+		}
+
+		klog.Infof("[NodeUnpublishVolume] unmount NFS volume %s from %s in host namespace", volumeID, targetPath)
+		if err := ns.hostNamespaceUnmount(targetPath); err != nil {
+			return nil, status.Errorf(codes.Internal, "Failed to umount host targetPath(%s), err: %v", targetPath, err)
+		}
+		return &csi.NodeUnpublishVolumeResponse{}, nil
+	}
 
 	// Unmount only if the target path is really a mount point.
 	// if notMnt, err := ns.mounter.IsLikelyNotMountPoint(targetPath); err != nil {
@@ -995,7 +1029,7 @@ func (ns *NodeServer) resolveNfsSecurity(
 		klog.Infof("[resolveNfsSecurity] No security option provided, default to sys")
 		return options, nil
 	}
-	
+
 	securityList := strings.Split(securityStr, ":")
 	sec := "sys"
 	if contains(securityList, "krb5p") {
@@ -1060,7 +1094,7 @@ func (ns *NodeServer) tryMountWithRDMA(
 	klog.Infof("[tryMountWithRDMA] Trying RDMA mount for volumeID(%v) nfsPath(%s) targetPath(%s) options(%v)",
 		volumeID, nfsPath, targetPath, rdmaOptions)
 
-	if err := ns.mounter.Mount(nfsPath, targetPath, "nfs", rdmaOptions); err != nil {
+	if err := ns.hostNamespaceMount(nfsPath, targetPath, "nfs", rdmaOptions); err != nil {
 		klog.Warningf("[tryMountWithRDMA] RDMA mount failed for volumeID(%v). Falling back to normal NFS. err: %v",
 			volumeID, err)
 		return false
@@ -1070,3 +1104,42 @@ func (ns *NodeServer) tryMountWithRDMA(
 	return true
 }
 
+func (ns *NodeServer) hostNamespaceIsLikelyNotMountPoint(targetPath string) (bool, error) {
+	_, err := ns.runInHostMountNamespace("findmnt", "-M", targetPath)
+	if err == nil {
+		return false, nil
+	}
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) && exitErr.ExitCode() == 1 {
+		return true, nil
+	}
+	return false, err
+}
+
+func (ns *NodeServer) hostNamespaceMount(source, target, fstype string, options []string) error {
+	args := []string{"mount"}
+	if fstype != "" {
+		args = append(args, "-t", fstype)
+	}
+	if len(options) > 0 {
+		args = append(args, "-o", strings.Join(options, ","))
+	}
+	args = append(args, source, target)
+	_, err := ns.runInHostMountNamespace(args...)
+	return err
+}
+
+func (ns *NodeServer) hostNamespaceUnmount(target string) error {
+	_, err := ns.runInHostMountNamespace("umount", target)
+	return err
+}
+
+func (ns *NodeServer) runInHostMountNamespace(args ...string) ([]byte, error) {
+	nsenterArgs := append([]string{"--mount=/proc/1/ns/mnt", "--"}, args...)
+	cmd := exec.Command("nsenter", nsenterArgs...)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return output, fmt.Errorf("nsenter %v failed: %w (output: %s)", args, err, strings.TrimSpace(string(output)))
+	}
+	return output, nil
+}

@@ -3,7 +3,7 @@ kind: PersistentVolumeClaim
 metadata:
   name: qsan-csi-pvc-clone
 spec:
-  storageClassName: qsan-xevo-storage
+  storageClassName: qsan-storage
   dataSource:
     name: qsan-csi-pvc
     kind: PersistentVolumeClaim

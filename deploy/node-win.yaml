@@ -1,7 +1,7 @@
 kind: DaemonSet
 apiVersion: apps/v1
 metadata:
-  name: xevo-csi-node-win
+  name: qsan-csi-node-win
   namespace: qsan
 spec:
   updateStrategy:
@@ -10,15 +10,15 @@ spec:
     type: RollingUpdate
   selector:
     matchLabels:
-      app: xevo-csi-node
+      app: qsan-csi-node
   template:
     metadata:
       labels:
-        app: xevo-csi-node
+        app: qsan-csi-node
     spec:
       hostNetwork: true  # original nfs connection would be broken without hostNetwork setting
       dnsPolicy: Default  # available values: Default, ClusterFirstWithHostNet, ClusterFirst
-      serviceAccountName: xevo-csi-node-sa
+      serviceAccountName: qsan-csi-node-sa
       nodeSelector:
         kubernetes.io/os: linux
       tolerations:
@@ -46,8 +46,8 @@ spec:
             capabilities:
               add: ["SYS_ADMIN"]
             allowPrivilegeEscalation: true
-          #image: qsandocker/qsan-xevo-csi:v1.0.0-b2
-          image: johnsoncheng0210/qsan-xevo-csi:latest
+          #image: qsandocker/qsan-csi:v1.0.0-b2
+          image: johnsoncheng0210/qsan-csi:latest
           imagePullPolicy: Always
           args:
             - "-v=4"

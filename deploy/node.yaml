@@ -1,7 +1,7 @@
 kind: DaemonSet
 apiVersion: apps/v1
 metadata:
-  name: xevo-csi-node
+  name: qsan-csi-node
   namespace: qsan
 spec:
   updateStrategy:
@@ -10,15 +10,16 @@ spec:
     type: RollingUpdate
   selector:
     matchLabels:
-      app: xevo-csi-node
+      app: qsan-csi-node
   template:
     metadata:
       labels:
-        app: xevo-csi-node
+        app: qsan-csi-node
     spec:
       hostNetwork: true  # original nfs connection would be broken without hostNetwork setting
+      hostPID: true  # required for nsenter to run mount/umount in host mount namespace
       dnsPolicy: Default  # available values: Default, ClusterFirstWithHostNet, ClusterFirst
-      serviceAccountName: xevo-csi-node-sa
+      serviceAccountName: qsan-csi-node-sa
       nodeSelector:
         kubernetes.io/os: linux
       tolerations:
@@ -52,7 +53,7 @@ spec:
             timeoutSeconds: 15
           env:
             - name: DRIVER_REG_SOCK_PATH
-              value: /var/lib/kubelet/plugins/qsan-xevo-csi/csi.sock
+              value: /var/lib/kubelet/plugins/qsan-csi/csi.sock
             - name: KUBE_NODE_NAME
               valueFrom:
                 fieldRef:
@@ -68,7 +69,7 @@ spec:
             capabilities:
               add: ["SYS_ADMIN"]
             allowPrivilegeEscalation: true
-          image: hub.qsan.com/csi/qsan-xevo-csi:v1.4.0-dev
+          image: qsandocker/qsan-csi:v1.5.0-dev
           imagePullPolicy: Always
           args:
             - "-v=2"
@@ -104,13 +105,11 @@ spec:
               mountPath: /csi
             - name: pods-mount-dir
               mountPath: /var/lib/kubelet/pods
-              mountPropagation: "Bidirectional"
             - name: qsan-auth
               mountPath: /etc/qsan
               readOnly: true
             - name: mountpoint-dir
               mountPath: /var/lib/kubelet/
-              mountPropagation: Bidirectional
             - name: host-dev
               mountPath: /dev
             - name: host-root
@@ -122,7 +121,7 @@ spec:
       volumes:
         - name: socket-dir
           hostPath:
-            path: /var/lib/kubelet/plugins/qsan-xevo-csi
+            path: /var/lib/kubelet/plugins/qsan-csi
             type: DirectoryOrCreate
         - name: pods-mount-dir
           hostPath:

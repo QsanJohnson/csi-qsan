@@ -4,7 +4,7 @@ metadata:
   name: clone-source-pvc-clone%d
   namespace: qtest
 spec:
-  storageClassName: qtest-xevo-storage
+  storageClassName: qtest-qsan-storage
   dataSource:
     name: clone-source-pvc%d
     kind: PersistentVolumeClaim

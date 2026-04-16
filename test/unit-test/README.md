@@ -26,7 +26,7 @@ If you want to test single path, change 'mpio' to 'false' in test.go and modify 
 ## Test Scope
 ```
 Namespace: qtest
-StorageClass: qtest-xevo-storage
+StorageClass: qtest-storage
 Scope:
   Single path or MPIO (default MPIO)
   ReadWriteMany with rw/ro

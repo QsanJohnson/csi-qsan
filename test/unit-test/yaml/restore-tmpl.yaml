@@ -5,7 +5,7 @@ metadata:
   name: restore-source-pvc-restore%d
   namespace: qtest
 spec:
-  storageClassName: qtest-xevo-storage
+  storageClassName: qtest-qsan-storage
   dataSource:
     name: restore-source-pvc-snap%d
     kind: VolumeSnapshot

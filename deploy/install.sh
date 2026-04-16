@@ -22,7 +22,7 @@ fi
 
 kubectl kustomize ${BASE_DIR}/ | kubectl create -f -
 
-if ! kubectl get volumesnapshotclass qsan-xevo-snapclass > /dev/null 2>&1; then
+if ! kubectl get volumesnapshotclass qsan-snapclass > /dev/null 2>&1; then
 	kubectl apply -f "${BASE_DIR}/snapclass.yaml"
 fi
 

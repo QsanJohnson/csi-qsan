@@ -1,21 +1,21 @@
 apiVersion: v1
 kind: ServiceAccount
 metadata:
-  name: xevo-csi-controller-sa
+  name: qsan-csi-controller-sa
   namespace: qsan
 
 ---
 apiVersion: v1
 kind: ServiceAccount
 metadata:
-  name: xevo-csi-node-sa
+  name: qsan-csi-node-sa
   namespace: qsan
 
 ---
 kind: ClusterRole
 apiVersion: rbac.authorization.k8s.io/v1
 metadata:
-  name: xevo-csi-controller-role
+  name: qsan-csi-controller-role
 rules:
   - apiGroups: [""]
     resources: ["persistentvolumes"]
@@ -73,7 +73,7 @@ rules:
 kind: ClusterRole
 apiVersion: rbac.authorization.k8s.io/v1
 metadata:
-  name: xevo-csi-node-role
+  name: qsan-csi-node-role
 rules:
   - apiGroups: ["storage.k8s.io"]
     resources: ["csinodes"]
@@ -86,26 +86,26 @@ rules:
 kind: ClusterRoleBinding
 apiVersion: rbac.authorization.k8s.io/v1
 metadata:
-  name: xevo-csi-controller-binding
+  name: qsan-csi-controller-binding
 subjects:
   - kind: ServiceAccount
-    name: xevo-csi-controller-sa
+    name: qsan-csi-controller-sa
     namespace: qsan
 roleRef:
   kind: ClusterRole
-  name: xevo-csi-controller-role
+  name: qsan-csi-controller-role
   apiGroup: rbac.authorization.k8s.io
 
 ---
 kind: ClusterRoleBinding
 apiVersion: rbac.authorization.k8s.io/v1
 metadata:
-  name: xevo-csi-node-binding
+  name: qsan-csi-node-binding
 subjects:
   - kind: ServiceAccount
-    name: xevo-csi-node-sa
+    name: qsan-csi-node-sa
     namespace: qsan
 roleRef:
   kind: ClusterRole
-  name: xevo-csi-node-role
+  name: qsan-csi-node-role
   apiGroup: rbac.authorization.k8s.io

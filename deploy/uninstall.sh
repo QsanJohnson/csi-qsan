@@ -3,7 +3,7 @@ BASE_DIR="$(cd "$(dirname "$0")" && pwd)"
 
 kubectl kustomize ${BASE_DIR}/ | kubectl delete -f -
 
-if kubectl get volumesnapshotclass qsan-xevo-snapclass > /dev/null 2>&1; then
+if kubectl get volumesnapshotclass qsan-snapclass > /dev/null 2>&1; then
 	kubectl delete -f "${BASE_DIR}/snapclass.yaml"
 fi
 

@@ -47,7 +47,7 @@ spec:
       name: nginx-pvc
     spec:
       accessModes: [ "ReadWriteMany" ]
-      storageClassName: qsan-xevo-storage
+      storageClassName: qsan-storage
       resources:
         requests:
           storage: 5Gi

@@ -1,8 +1,8 @@
 apiVersion: storage.k8s.io/v1
 kind: StorageClass
 metadata:
-  name: qsan-xevo-storage-topol2
-provisioner: xevo.csi.qsan.com
+  name: qsan-storage-topol2
+provisioner: csi.qsan.com
 parameters:
   protocol: "iscsi"
   server: 192.168.217.201

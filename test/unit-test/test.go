@@ -126,7 +126,7 @@ func Cleanup() error {
 func DeployCSIDriver() error {
 	fmt.Println("[DeployCSIDriver]")
 
-	if _, err := execCmd("kubectl wait pods -l app=xevo-csi-controller -n qsan --for=condition=Ready --timeout=600s 2>/dev/null"); err == nil {
+	if _, err := execCmd("kubectl wait pods -l app=qsan-csi-controller -n qsan --for=condition=Ready --timeout=600s 2>/dev/null"); err == nil {
 		fmt.Printf("CSI Driver was already deployed\n\n")
 		csi_exist = true
 		return nil
@@ -138,12 +138,12 @@ func DeployCSIDriver() error {
 	}
 
 	fmt.Println("Wait CSI controller plugin ready")
-	if _, err := execCmd("kubectl wait pods -l app=xevo-csi-controller -n qsan --for=condition=Ready --timeout=600s"); err != nil {
+	if _, err := execCmd("kubectl wait pods -l app=qsan-csi-controller -n qsan --for=condition=Ready --timeout=600s"); err != nil {
 		return fmt.Errorf("kubectl wait controller plugin failed. err: %v\n", err)
 	}
 
 	fmt.Println("Wait CSI node plugin ready")
-	if _, err := execCmd("kubectl wait pods -l app=xevo-csi-node -n qsan --for=condition=Ready --timeout=600s"); err != nil {
+	if _, err := execCmd("kubectl wait pods -l app=qsan-csi-node -n qsan --for=condition=Ready --timeout=600s"); err != nil {
 		return fmt.Errorf("kubectl wait node plugin failed. err: %v\n", err)
 	}
 
@@ -166,7 +166,7 @@ func DeployCSIDriver_Cleanup() error {
 func DeployStorageClass() error {
 	fmt.Println("[DeployStorageClass]")
 
-	if _, err := execCmd("kubectl get sc qtest-xevo-storage"); err != nil {
+	if _, err := execCmd("kubectl get sc qtest-qsan-storage"); err != nil {
 		if mpio {
 			if _, err := execCmd("kubectl create -f yaml/sc-m.yaml"); err != nil {
 				return fmt.Errorf("Deploy sc-m.yaml failed. err: %v\n", err)
@@ -204,7 +204,7 @@ func DeployStorageClass_Cleanup() error {
 func DeploySnapshotClass() error {
 	fmt.Println("[DeploySnapshotClass]")
 
-	if _, err := execCmd("kubectl get volumesnapshotclass qtest-xevo-snapclass"); err != nil {
+	if _, err := execCmd("kubectl get volumesnapshotclass qtest-qsan-snapclass"); err != nil {
 		if _, err := execCmd("kubectl create -f yaml/snapclass.yaml"); err != nil {
 			return fmt.Errorf("Deploy snapclass.yaml failed. err: %v\n", err)
 		}
@@ -970,15 +970,15 @@ func ensureProtocol(p string) (string, error) {
 }
 
 func getTestProtocol() (string, error) {
-	protocol, err := execCmd("kubectl get sc qtest-xevo-storage -o jsonpath='{.parameters.protocol}'")
+	protocol, err := execCmd("kubectl get sc qtest-qsan-storage -o jsonpath='{.parameters.protocol}'")
 	if err != nil {
-		return "", fmt.Errorf("Get protocol from qtest-xevo-storage StorageClass failed, err: %v\n", err)
+		return "", fmt.Errorf("Get protocol from qtest-qsan-storage StorageClass failed, err: %v\n", err)
 	} else {
 		if protocol == "iscsi" || protocol == "fc" || protocol == "nfs" {
 			fmt.Println("Test protocol: ", protocol)
 			return protocol, nil
 		} else {
-			return protocol, fmt.Errorf("Unknown protocol(%s) in qtest-xevo-storage StorageClass\n", protocol)
+			return protocol, fmt.Errorf("Unknown protocol(%s) in qtest-qsan-storage StorageClass\n", protocol)
 		}
 	}
 }
