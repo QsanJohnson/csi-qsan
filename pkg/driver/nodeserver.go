@@ -785,16 +785,26 @@ func (ns *NodeServer) NodeGetVolumeStats(ctx context.Context, req *csi.NodeGetVo
 	}
 
 	klog.Infof("[NodeGetVolumeStats] volumeID(%s) volumePath(%s)", volumeID, volumePath)
-	if mnt, err := ns.mounter.IsMountPoint(volumePath); err != nil {
-		return nil, status.Errorf(codes.NotFound, "Could not get mount information from %s: %+v", volumePath, err)
-	} else if !mnt {
-		return nil, status.Errorf(codes.NotFound, "volumePath(%s) not mount", volumePath)
-	}
-
 	volData, err := ns.Driver.GetContextDataFromVolumeContextID(volumeID)
 	// klog.Infof("[NodeGetVolumeStats] volData: %+v", volData)
 	if err != nil {
 		return nil, status.Error(codes.InvalidArgument, fmt.Sprintf("Failed to get volume context data from Volume ID %s: %v", volumeID, err))
+	}
+
+	if volData.protocol == protocolNFS {
+		notMnt, err := ns.hostNamespaceIsLikelyNotMountPoint(volumePath)
+		if err != nil {
+			return nil, status.Errorf(codes.NotFound, "Could not get host mount information from %s: %+v", volumePath, err)
+		}
+		if notMnt {
+			return nil, status.Errorf(codes.NotFound, "volumePath(%s) not mount", volumePath)
+		}
+	} else {
+		if mnt, err := ns.mounter.IsMountPoint(volumePath); err != nil {
+			return nil, status.Errorf(codes.NotFound, "Could not get mount information from %s: %+v", volumePath, err)
+		} else if !mnt {
+			return nil, status.Errorf(codes.NotFound, "volumePath(%s) not mount", volumePath)
+		}
 	}
 
 	authClient, err := ns.Driver.qsan.GetnAddAuthClient(ctx, volData.server)
