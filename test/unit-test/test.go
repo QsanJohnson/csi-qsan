@@ -524,7 +524,7 @@ func TestSnapshot() error {
 			return fmt.Errorf("Create VolumeSnapshot(%s) failed. err: %v\n", fmt.Sprintf(snap, i), err)
 		}
 
-		if _, err := execCmd("kubectl wait --for=jsonpath='{.status.readyToUse}'=true --timeout=180s -n qtest volumesnapshot/" + fmt.Sprintf(snap, i)); err != nil {
+		if err := waitForVolumeSnapshotReady(fmt.Sprintf(snap, i), 180*time.Second); err != nil {
 			return fmt.Errorf("kubectl wait volumesnapshot/%s failed. err: %v\n", fmt.Sprintf(snap, i), err)
 		}
 	}
@@ -541,7 +541,7 @@ func TestSnapshot() error {
 		return fmt.Errorf("Failed to create VolumeSnapshot %s. err: %v\n", snapname, err)
 	}
 
-	if _, err := execCmd("kubectl wait --for=jsonpath='{.status.readyToUse}'=true --timeout=120s -n qtest volumesnapshot/" + snapname); err != nil {
+	if err := waitForVolumeSnapshotReady(snapname, 120*time.Second); err != nil {
 		fmt.Printf("kubectl wait volumesnapshot/%s failed. err: %v\n", snapname, err)
 		fmt.Printf("Correct! It should fail.\n\n")
 	} else {
@@ -558,12 +558,12 @@ func TestSnapshot() error {
 	if _, err := execCmdEx("kubectl", strings.NewReader(fmt.Sprintf(yamlSnap, 258)), "create", "-f", "-"); err != nil {
 		return fmt.Errorf("Create VolumeSnapshot(%s) failed. err: %v\n", fmt.Sprintf(snap, 258), err)
 	}
-	if _, err := execCmd("kubectl wait --for=jsonpath='{.status.readyToUse}'=true --timeout=180s -n qtest volumesnapshot/" + fmt.Sprintf(snap, 258)); err != nil {
+	if err := waitForVolumeSnapshotReady(fmt.Sprintf(snap, 258), 180*time.Second); err != nil {
 		return fmt.Errorf("kubectl wait volumesnapshot/%s failed. err: %v\n", fmt.Sprintf(snap, 258), err)
 	}
 
 	// This time, snapshot 258 should succeed because snapshot 1 & 2 will be cleaned (force delete)
-	if _, err := execCmd("kubectl wait --for=jsonpath='{.status.readyToUse}'=true --timeout=300s -n qtest volumesnapshot/" + fmt.Sprintf(snap, 257)); err != nil {
+	if err := waitForVolumeSnapshotReady(fmt.Sprintf(snap, 257), 300*time.Second); err != nil {
 		return fmt.Errorf("kubectl wait volumesnapshot/%s failed. err: %v\n", fmt.Sprintf(snap, 257), err)
 	}
 
@@ -573,7 +573,7 @@ func TestSnapshot() error {
 		return fmt.Errorf("Create VolumeSnapshot(%s) failed. err: %v\n", snapname, err)
 	}
 
-	if _, err := execCmd("kubectl wait --for=jsonpath='{.status.readyToUse}'=true --timeout=120s -n qtest volumesnapshot/" + snapname); err != nil {
+	if err := waitForVolumeSnapshotReady(snapname, 120*time.Second); err != nil {
 		fmt.Printf("kubectl wait volumesnapshot/%s failed. err: %v\n", snapname, err)
 		fmt.Printf("Correct! It should fail.\n\n")
 
@@ -915,6 +915,22 @@ func execCmds(commands []string) {
 		if _, err := execCmd(cmd); err != nil {
 			fmt.Printf("%s failed. err: %v\n", cmd, err)
 		}
+	}
+}
+
+func waitForVolumeSnapshotReady(snapshotName string, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	for {
+		if time.Now().After(deadline) {
+			return fmt.Errorf("timeout after %s waiting for VolumeSnapshot %s status.readyToUse=true", timeout, snapshotName)
+		}
+
+		out, err := execCmd("kubectl get volumesnapshot/" + snapshotName + " -n qtest -o jsonpath='{.status.readyToUse}'")
+		if err == nil && strings.Trim(out, "'\n ") == "true" {
+			return nil
+		}
+
+		time.Sleep(2 * time.Second)
 	}
 }
 
