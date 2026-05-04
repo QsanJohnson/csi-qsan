@@ -656,12 +656,18 @@ func (ns *NodeServer) NodeUnpublishVolume(ctx context.Context, req *csi.NodeUnpu
 		}
 		if notMnt {
 			klog.Infof("[NodeUnpublishVolume] targetPath(%s) is already unmounted in host namespace", targetPath)
+			if err := ns.removeTargetPath(targetPath); err != nil {
+				return nil, status.Error(codes.Internal, err.Error())
+			}
 			return &csi.NodeUnpublishVolumeResponse{}, nil
 		}
 
 		klog.Infof("[NodeUnpublishVolume] unmount NFS volume %s from %s in host namespace", volumeID, targetPath)
 		if err := ns.hostNamespaceUnmount(targetPath); err != nil {
 			return nil, status.Errorf(codes.Internal, "Failed to umount host targetPath(%s), err: %v", targetPath, err)
+		}
+		if err := ns.removeTargetPath(targetPath); err != nil {
+			return nil, status.Error(codes.Internal, err.Error())
 		}
 		return &csi.NodeUnpublishVolumeResponse{}, nil
 	}
@@ -733,10 +739,8 @@ func (ns *NodeServer) NodeUnpublishVolume(ctx context.Context, req *csi.NodeUnpu
 		klog.Infof("[NodeUnpublishVolume] WARNING!! targetPath(%s) mnt(%v) err: %v", targetPath, mnt, err)
 	}
 
-	// Delete the mount point.
-	// Does not return error for non-existent path, repeated calls OK for idempotency.
-	if err := os.RemoveAll(targetPath); err != nil {
-		return nil, status.Error(codes.Internal, fmt.Sprintf("Failed to remove targetPath(%s), err: %v", targetPath, err))
+	if err := ns.removeTargetPath(targetPath); err != nil {
+		return nil, status.Error(codes.Internal, err.Error())
 	}
 	klog.Infof("[NodeUnpublishVolume] Volume ID %s has been unpublished.", volumeID)
 
@@ -744,6 +748,22 @@ func (ns *NodeServer) NodeUnpublishVolume(ctx context.Context, req *csi.NodeUnpu
 }
 
 // NodeGetInfo return info of the node on which this plugin is running
+
+func (ns *NodeServer) removeTargetPath(targetPath string) error {
+	// Delete target path in container namespace for idempotency.
+	if err := os.RemoveAll(targetPath); err != nil {
+		return fmt.Errorf("failed to remove targetPath(%s) in container namespace, err: %v", targetPath, err)
+	}
+
+	// Also cleanup host namespace path when mountPropagation is not Bidirectional.
+	if output, err := ns.runInHostMountNamespace("rm", "-rf", targetPath); err != nil {
+		return fmt.Errorf("failed to remove targetPath(%s) in host namespace, err: %v", targetPath, err)
+	} else if len(strings.TrimSpace(string(output))) > 0 {
+		klog.Infof("[removeTargetPath] host cleanup output: %s", strings.TrimSpace(string(output)))
+	}
+	return nil
+}
+
 func (ns *NodeServer) NodeGetInfo(ctx context.Context, req *csi.NodeGetInfoRequest) (*csi.NodeGetInfoResponse, error) {
 	topology := map[string]string{}
 	nameArr := GetFcTargetNodeNames()
@@ -788,6 +808,12 @@ func (ns *NodeServer) NodeGetVolumeStats(ctx context.Context, req *csi.NodeGetVo
 	volData, err := ns.Driver.GetContextDataFromVolumeContextID(volumeID)
 	// klog.Infof("[NodeGetVolumeStats] volData: %+v", volData)
 	if err != nil {
+		if mnt, mountErr := ns.mounter.IsMountPoint(volumePath); mountErr != nil || !mnt {
+			if mountErr != nil {
+				return nil, status.Errorf(codes.NotFound, "Could not get mount information from %s: %+v", volumePath, mountErr)
+			}
+			return nil, status.Errorf(codes.NotFound, "volumePath(%s) not mount", volumePath)
+		}
 		return nil, status.Error(codes.InvalidArgument, fmt.Sprintf("Failed to get volume context data from Volume ID %s: %v", volumeID, err))
 	}
 
