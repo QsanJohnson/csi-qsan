@@ -31,6 +31,9 @@ type NodeServer struct {
 	mounter *mount.SafeFormatAndMount
 }
 
+// All protocols use host mount namespace in current non-Bidirectional architecture.
+var isHostNamespace = true
+
 // NodeStageVolume stage volume
 func (ns *NodeServer) NodeStageVolume(ctx context.Context, req *csi.NodeStageVolumeRequest) (*csi.NodeStageVolumeResponse, error) {
 	volCap := req.GetVolumeCapability()
@@ -99,6 +102,12 @@ func (ns *NodeServer) stageBlockVolumeFilesystem(ctx context.Context, req *csi.N
 			return nil, status.Error(codes.Internal, fmt.Sprintf("stageBlockVolumeFilesystem, check staging path(%s): %v", stagingPath, err))
 		}
 	}
+	if isHostNamespace {
+		notMnt, err = ns.hostNamespaceIsLikelyNotMountPoint(stagingPath)
+		if err != nil {
+			return nil, status.Error(codes.Internal, fmt.Sprintf("stageBlockVolumeFilesystem, check host staging path(%s): %v", stagingPath, err))
+		}
+	}
 
 	klog.Infof("[stageBlockVolumeFilesystem] volumeID(%s) stagingPath(%s) notMnt(%v) secrets(%+v)", volumeID, stagingPath, notMnt, req.GetSecrets())
 	if !notMnt {
@@ -155,7 +164,19 @@ func (ns *NodeServer) stageBlockVolumeFilesystem(ctx context.Context, req *csi.N
 		}
 		options = append(options, mountOptions...)
 		klog.Infof("[stageBlockVolumeFilesystem] FormatAndMount volumeID(%v) devPath(%s) stagingPath(%s) fsType(%v) options(%v)", volumeID, devPath, stagingPath, fsType, options)
-		if err = ns.mounter.FormatAndMount(devPath, stagingPath, fsType, options); err != nil {
+		if isHostNamespace {
+			if len(existingFormat) == 0 {
+				if err = ns.formatDevice(fsType, devPath); err != nil {
+					klog.Warningf("[stageBlockVolumeFilesystem] formatDevice volumeID(%v) failed. err: %v", volumeID, err)
+				}
+			}
+			if err == nil {
+				err = ns.hostNamespaceMount(devPath, stagingPath, fsType, options)
+			}
+		} else {
+			err = ns.mounter.FormatAndMount(devPath, stagingPath, fsType, options)
+		}
+		if err != nil {
 			klog.Warningf("[stageBlockVolumeFilesystem] FormatAndMount volumeID(%v) failed. err: %v \ntry to recover it", volumeID, err)
 
 			if err := ns.mounter.Unmount(stagingPath); err != nil {
@@ -206,7 +227,11 @@ func (ns *NodeServer) stageBlockVolumeFilesystem(ctx context.Context, req *csi.N
 		options := []string{"ro"}
 		options = append(options, mountOptions...)
 		klog.Infof("[stageBlockVolumeFilesystem] Mount volumeID(%v) devPath(%s) stagingPath(%s) fsType(%v) options(%v)", volumeID, devPath, stagingPath, fsType, options)
-		if err := ns.mounter.Mount(devPath, stagingPath, "", options); err != nil {
+		if isHostNamespace {
+			if err := ns.hostNamespaceMount(devPath, stagingPath, "", options); err != nil {
+				return nil, status.Error(codes.Internal, fmt.Sprintf("failed to mount devPath: %s to %s in host namespace: %v", devPath, stagingPath, err))
+			}
+		} else if err := ns.mounter.Mount(devPath, stagingPath, "", options); err != nil {
 			return nil, status.Error(codes.Internal, fmt.Sprintf("failed to mount devPath: %s to %s: %v", devPath, stagingPath, err))
 		}
 	}
@@ -371,15 +396,36 @@ func (ns *NodeServer) NodeUnstageVolume(ctx context.Context, req *csi.NodeUnstag
 		}
 		notMount = true
 	}
-	if !notMount {
-		devName, refCnt, err := mount.GetDeviceNameFromMount(ns.mounter, stagingPath)
+	if isHostNamespace {
+		notMount, err = ns.hostNamespaceIsLikelyNotMountPoint(stagingPath)
 		if err != nil {
-			return nil, status.Errorf(codes.Internal, "failed to GetDeviceNameFromMount(%s): %v", stagingPath, err)
+			return nil, status.Errorf(codes.Internal, "failed to check host staging mountpoint(%s): %v", stagingPath, err)
 		}
-		klog.Infof("[NodeUnstageVolume] GetDeviceNameFromMount, devName(%s) refCnt(%d)", devName, refCnt)
+	}
+
+	if !notMount {
+		devName := ""
+		if isHostNamespace {
+			devName, err = ns.hostNamespaceGetMountSource(stagingPath)
+			if err != nil {
+				return nil, status.Errorf(codes.Internal, "failed to get host mount source(%s): %v", stagingPath, err)
+			}
+			klog.Infof("[NodeUnstageVolume] Host mount source, devName(%s)", devName)
+		} else {
+			var refCnt int
+			devName, refCnt, err = mount.GetDeviceNameFromMount(ns.mounter, stagingPath)
+			if err != nil {
+				return nil, status.Errorf(codes.Internal, "failed to GetDeviceNameFromMount(%s): %v", stagingPath, err)
+			}
+			klog.Infof("[NodeUnstageVolume] GetDeviceNameFromMount, devName(%s) refCnt(%d)", devName, refCnt)
+		}
 
 		klog.Infof("[NodeUnstageVolume] unmount volume %s from %s", volumeID, stagingPath)
-		if err = ns.mounter.Unmount(stagingPath); err != nil {
+		if isHostNamespace {
+			if err = ns.hostNamespaceUnmount(stagingPath); err != nil {
+				return nil, status.Errorf(codes.Internal, "failed to unmount host target %q: %v", stagingPath, err)
+			}
+		} else if err = ns.mounter.Unmount(stagingPath); err != nil {
 			return nil, status.Errorf(codes.Internal, "failed to unmount target %q: %v", stagingPath, err)
 		}
 
@@ -487,6 +533,12 @@ func (ns *NodeServer) publishBlockVolume(ctx context.Context, req *csi.NodePubli
 		}
 		notMnt = true
 	}
+	if isHostNamespace {
+		notMnt, err = ns.hostNamespaceIsLikelyNotMountPoint(targetPath)
+		if err != nil {
+			return nil, status.Error(codes.Internal, fmt.Sprintf("error checking host mountpoint path %s: %v", targetPath, err))
+		}
+	}
 	if !notMnt {
 		// It's already mounted.
 		klog.Infof("Skipping bind-mounting subpath %s: already mounted", targetPath)
@@ -496,7 +548,11 @@ func (ns *NodeServer) publishBlockVolume(ctx context.Context, req *csi.NodePubli
 	devPath := "/dev/" + diskName
 	options := []string{"bind"}
 	klog.Infof("[publishBlockVolume] volumeID(%v) devPath(%s) targetPath(%s) mountflags(%v)", volumeID, devPath, targetPath, options)
-	if err := ns.mounter.Mount(devPath, targetPath, "", options); err != nil {
+	if isHostNamespace {
+		if err := ns.hostNamespaceMount(devPath, targetPath, "", options); err != nil {
+			return nil, status.Error(codes.Internal, fmt.Sprintf("failed to mount devPath in host namespace: %s to %s: %v", devPath, targetPath, err))
+		}
+	} else if err := ns.mounter.Mount(devPath, targetPath, "", options); err != nil {
 		return nil, status.Error(codes.Internal, fmt.Sprintf("failed to mount devPath: %s to %s: %v", devPath, targetPath, err))
 	}
 
@@ -537,8 +593,9 @@ func (ns *NodeServer) publishFilesystemVolume(ctx context.Context, req *csi.Node
 		}
 	}
 
-	isNFS := req.VolumeContext["protocol"] == protocolNFS
-	if isNFS {
+	protocol := req.VolumeContext["protocol"]
+	isNFS := protocol == protocolNFS
+	if isHostNamespace {
 		notMnt, err = ns.hostNamespaceIsLikelyNotMountPoint(targetPath)
 		if err != nil {
 			return nil, status.Error(codes.Internal, fmt.Sprintf("check host mount point target path(%s): %v", targetPath, err))
@@ -628,7 +685,11 @@ func (ns *NodeServer) publishFilesystemVolume(ctx context.Context, req *csi.Node
 		}
 
 		klog.Infof("[publishFilesystemVolume] volumeID(%v) stagingPath(%s) targetPath(%s) mountflags(%v)", volumeID, stagingPath, targetPath, options)
-		if err := ns.mounter.Mount(stagingPath, targetPath, "", options); err != nil {
+		if isHostNamespace {
+			if err := ns.hostNamespaceMount(stagingPath, targetPath, "", options); err != nil {
+				return nil, status.Error(codes.Internal, fmt.Sprintf("failed to mount device in host namespace: %s at %s: %s", stagingPath, targetPath, err.Error()))
+			}
+		} else if err := ns.mounter.Mount(stagingPath, targetPath, "", options); err != nil {
 			return nil, status.Error(codes.Internal, fmt.Sprintf("failed to mount device: %s at %s: %s", stagingPath, targetPath, err.Error()))
 		}
 	}
@@ -649,7 +710,7 @@ func (ns *NodeServer) NodeUnpublishVolume(ctx context.Context, req *csi.NodeUnpu
 	ns.mutex.Lock()
 	defer ns.mutex.Unlock()
 
-	if volData, err := ns.Driver.GetContextDataFromVolumeContextID(volumeID); err == nil && volData.protocol == protocolNFS {
+	if _, err := ns.Driver.GetContextDataFromVolumeContextID(volumeID); err == nil && isHostNamespace {
 		notMnt, err := ns.hostNamespaceIsLikelyNotMountPoint(targetPath)
 		if err != nil {
 			return nil, status.Errorf(codes.Internal, "Check host targetPath(%s) mount point failed: %v", targetPath, err)
@@ -662,7 +723,7 @@ func (ns *NodeServer) NodeUnpublishVolume(ctx context.Context, req *csi.NodeUnpu
 			return &csi.NodeUnpublishVolumeResponse{}, nil
 		}
 
-		klog.Infof("[NodeUnpublishVolume] unmount NFS volume %s from %s in host namespace", volumeID, targetPath)
+		klog.Infof("[NodeUnpublishVolume] unmount volume %s from %s in host namespace", volumeID, targetPath)
 		if err := ns.hostNamespaceUnmount(targetPath); err != nil {
 			return nil, status.Errorf(codes.Internal, "Failed to umount host targetPath(%s), err: %v", targetPath, err)
 		}
@@ -808,16 +869,26 @@ func (ns *NodeServer) NodeGetVolumeStats(ctx context.Context, req *csi.NodeGetVo
 	volData, err := ns.Driver.GetContextDataFromVolumeContextID(volumeID)
 	// klog.Infof("[NodeGetVolumeStats] volData: %+v", volData)
 	if err != nil {
-		if mnt, mountErr := ns.mounter.IsMountPoint(volumePath); mountErr != nil || !mnt {
+		if isHostNamespace {
+			notMnt, mountErr := ns.hostNamespaceIsLikelyNotMountPoint(volumePath)
 			if mountErr != nil {
-				return nil, status.Errorf(codes.NotFound, "Could not get mount information from %s: %+v", volumePath, mountErr)
+				return nil, status.Errorf(codes.NotFound, "Could not get host mount information from %s: %+v", volumePath, mountErr)
 			}
-			return nil, status.Errorf(codes.NotFound, "volumePath(%s) not mount", volumePath)
+			if notMnt {
+				return nil, status.Errorf(codes.NotFound, "volumePath(%s) not mount", volumePath)
+			}
+		} else {
+			if mnt, mountErr := ns.mounter.IsMountPoint(volumePath); mountErr != nil || !mnt {
+				if mountErr != nil {
+					return nil, status.Errorf(codes.NotFound, "Could not get mount information from %s: %+v", volumePath, mountErr)
+				}
+				return nil, status.Errorf(codes.NotFound, "volumePath(%s) not mount", volumePath)
+			}
 		}
 		return nil, status.Error(codes.InvalidArgument, fmt.Sprintf("Failed to get volume context data from Volume ID %s: %v", volumeID, err))
 	}
 
-	if volData.protocol == protocolNFS {
+	if isHostNamespace {
 		notMnt, err := ns.hostNamespaceIsLikelyNotMountPoint(volumePath)
 		if err != nil {
 			return nil, status.Errorf(codes.NotFound, "Could not get host mount information from %s: %+v", volumePath, err)
@@ -999,11 +1070,24 @@ func (ns *NodeServer) NodeExpandVolume(ctx context.Context, req *csi.NodeExpandV
 		}
 
 	} else if req.GetVolumeCapability().GetMount() != nil {
-		devName, refCnt, err := mount.GetDeviceNameFromMount(ns.mounter, volumePath)
-		if err != nil {
-			klog.Warningf("[NodeExpandVolume] GetDeviceNameFromMount failed: %v", err)
+		devName := ""
+		refCnt := 0
+		if isHostNamespace {
+			devName, err = ns.hostNamespaceGetMountSource(volumePath)
+			if err != nil {
+				klog.Warningf("[NodeExpandVolume] hostNamespaceGetMountSource failed: %v", err)
+			}
+		} else {
+			devName, refCnt, err = mount.GetDeviceNameFromMount(ns.mounter, volumePath)
+			if err != nil {
+				klog.Warningf("[NodeExpandVolume] GetDeviceNameFromMount failed: %v", err)
+			}
 		}
 		klog.Infof("[NodeExpandVolume] Expand mounted device %s, refCnt(%d)", devName, refCnt)
+
+		if devName == "" {
+			return nil, status.Errorf(codes.Internal, "[NodeExpandVolume] failed to get mounted device from %s", volumePath)
+		}
 
 		if volData.protocol == protocolISCSI {
 			iscsi.ExpandDisk(devName, lunData.Name)
@@ -1140,6 +1224,16 @@ func (ns *NodeServer) tryMountWithRDMA(
 	return true
 }
 
+func (ns *NodeServer) formatDevice(fsType, devicePath string) error {
+	mkfsBin := "mkfs." + fsType
+	cmd := exec.Command(mkfsBin, "-F", devicePath)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("format device failed: %s -F %s: %w (output: %s)", mkfsBin, devicePath, err, strings.TrimSpace(string(output)))
+	}
+	return nil
+}
+
 func (ns *NodeServer) hostNamespaceIsLikelyNotMountPoint(targetPath string) (bool, error) {
 	_, err := ns.runInHostMountNamespace("findmnt", "-M", targetPath)
 	if err == nil {
@@ -1165,12 +1259,28 @@ func (ns *NodeServer) hostNamespaceMount(source, target, fstype string, options 
 	return err
 }
 
+func (ns *NodeServer) hostNamespaceGetMountSource(target string) (string, error) {
+	output, err := ns.runInHostMountNamespace("findmnt", "-n", "-o", "SOURCE", "-M", target)
+	if err != nil {
+		return "", err
+	}
+	sources := strings.Fields(strings.TrimSpace(string(output)))
+	if len(sources) == 0 {
+		return "", fmt.Errorf("empty mount source for target %s", target)
+	}
+	if len(sources) > 1 {
+		klog.Warningf("[hostNamespaceGetMountSource] target(%s) has multiple sources %v, use first source %s", target, sources, sources[0])
+	}
+	return sources[0], nil
+}
+
 func (ns *NodeServer) hostNamespaceUnmount(target string) error {
 	_, err := ns.runInHostMountNamespace("umount", target)
 	return err
 }
 
 func (ns *NodeServer) runInHostMountNamespace(args ...string) ([]byte, error) {
+	klog.Infof("[runInHostMountNamespace] %v", args)
 	nsenterArgs := append([]string{"--mount=/proc/1/ns/mnt", "--"}, args...)
 	cmd := exec.Command("nsenter", nsenterArgs...)
 	output, err := cmd.CombinedOutput()
