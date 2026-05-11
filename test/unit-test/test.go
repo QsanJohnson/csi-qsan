@@ -20,6 +20,9 @@ const (
 	numTests        = 1
 	numCloneTests   = 3
 	numRestoreTests = 3
+
+	testNamespace    = "qtest"
+	testStorageClass = "qtest-qsan-storage"
 )
 
 var csi_exist bool
@@ -187,6 +190,14 @@ func DeployStorageClass() error {
 
 func DeployStorageClass_Cleanup() error {
 	fmt.Println("[DeployStorageClass_Cleanup]")
+
+	if err := waitForTestPVCsDeleted(10 * time.Minute); err != nil {
+		return err
+	}
+
+	if err := waitForTestPVsDeleted(10 * time.Minute); err != nil {
+		return err
+	}
 
 	if mpio {
 		if _, err := execCmd("kubectl delete -f yaml/sc-m.yaml --ignore-not-found=true"); err != nil {
@@ -916,6 +927,63 @@ func execCmds(commands []string) {
 			fmt.Printf("%s failed. err: %v\n", cmd, err)
 		}
 	}
+}
+
+func waitForTestPVCsDeleted(timeout time.Duration) error {
+	fmt.Printf("Wait for all PVCs in namespace %s to be deleted\n", testNamespace)
+	return waitForResourcesDeleted("PVC", timeout, func() ([]string, error) {
+		out, err := execCmd(fmt.Sprintf("kubectl get pvc -n %s -o jsonpath='{range .items[*]}{.metadata.name}{\"\\n\"}{end}'", testNamespace))
+		if err != nil {
+			if strings.Contains(err.Error(), "not found") || strings.Contains(err.Error(), "NotFound") {
+				return nil, nil
+			}
+			return nil, err
+		}
+		return splitResourceNames(out), nil
+	})
+}
+
+func waitForTestPVsDeleted(timeout time.Duration) error {
+	fmt.Printf("Wait for all PVs using StorageClass %s to be deleted\n", testStorageClass)
+	return waitForResourcesDeleted("PV", timeout, func() ([]string, error) {
+		out, err := execCmd(fmt.Sprintf(`kubectl get pv -o jsonpath='{range .items[?(@.spec.storageClassName=="%s")]}{.metadata.name}{"\n"}{end}'`, testStorageClass))
+		if err != nil {
+			return nil, err
+		}
+		return splitResourceNames(out), nil
+	})
+}
+
+func waitForResourcesDeleted(resourceType string, timeout time.Duration, listResources func() ([]string, error)) error {
+	deadline := time.Now().Add(timeout)
+	var lastResources []string
+
+	for {
+		resources, err := listResources()
+		if err != nil {
+			return fmt.Errorf("failed to list remaining %s resources: %v", resourceType, err)
+		}
+		if len(resources) == 0 {
+			fmt.Printf("All %s resources are deleted\n", resourceType)
+			return nil
+		}
+
+		lastResources = resources
+		if time.Now().After(deadline) {
+			return fmt.Errorf("timeout after %s waiting for %s resources to be deleted. Remaining: %s", timeout, resourceType, strings.Join(lastResources, ", "))
+		}
+
+		fmt.Printf("Waiting for %s resources to be deleted: %s\n", resourceType, strings.Join(resources, ", "))
+		time.Sleep(5 * time.Second)
+	}
+}
+
+func splitResourceNames(out string) []string {
+	fields := strings.Fields(strings.TrimSpace(out))
+	if fields == nil {
+		return []string{}
+	}
+	return fields
 }
 
 func waitForVolumeSnapshotReady(snapshotName string, timeout time.Duration) error {

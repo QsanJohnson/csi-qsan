@@ -86,6 +86,33 @@ type GenericVolumeInterface interface {
 	DeleteCloneTask(ctx context.Context, volId string) error
 }
 
+func newGenericVolumeAPI(authClient *goqsan.AuthClient, protocol string) (volumeAPI GenericVolumeInterface, err error) {
+	if authClient == nil {
+		return nil, fmt.Errorf("auth client is nil")
+	}
+
+	defer func() {
+		if r := recover(); r != nil {
+			volumeAPI = nil
+			err = fmt.Errorf("failed to initialize QSAN volume API for protocol %s: %v", protocol, r)
+		}
+	}()
+
+	if protocol == protocolNFS {
+		fileVolumeAPI := goqsan.NewFileVolume(authClient)
+		if fileVolumeAPI == nil {
+			return nil, fmt.Errorf("failed to initialize QSAN file volume API for protocol %s", protocol)
+		}
+		return &FileVolumeWrapper{op: fileVolumeAPI}, nil
+	}
+
+	blockVolumeAPI := goqsan.NewVolume(authClient)
+	if blockVolumeAPI == nil {
+		return nil, fmt.Errorf("failed to initialize QSAN block volume API for protocol %s", protocol)
+	}
+	return &VolumeWrapper{op: blockVolumeAPI}, nil
+}
+
 // Define a wrapper for FileVolumeOp
 type FileVolumeWrapper struct {
 	op *goqsan.FileVolumeOp

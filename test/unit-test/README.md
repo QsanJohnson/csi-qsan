@@ -1,7 +1,7 @@
 ## Usage
 Method1: Use go test
 ```
-# go test -timeout 7200s
+# go test -timeout 6h
 ```
 
 Method2: Use go run main utility

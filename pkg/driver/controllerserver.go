@@ -1515,11 +1515,20 @@ func (cs *ControllerServer) ControllerGetVolume(ctx context.Context, req *csi.Co
 		return nil, status.Error(codes.Internal, err.Error())
 	}
 
-	var volumeAPI GenericVolumeInterface
-	if volData.protocol == protocolNFS {
-		volumeAPI = &FileVolumeWrapper{op: goqsan.NewFileVolume(authClient)}
-	} else {
-		volumeAPI = &VolumeWrapper{op: goqsan.NewVolume(authClient)}
+	volumeAPI, err := newGenericVolumeAPI(authClient, volData.protocol)
+	if err != nil {
+		klog.Warningf("[ControllerGetVolume] Failed to initialize volume API for Volume ID %s: %v", volumeID, err)
+		return &csi.ControllerGetVolumeResponse{
+			Volume: &csi.Volume{
+				VolumeId: volumeID,
+			},
+			Status: &csi.ControllerGetVolumeResponse_VolumeStatus{
+				VolumeCondition: &csi.VolumeCondition{
+					Abnormal: true,
+					Message:  err.Error(),
+				},
+			},
+		}, nil
 	}
 	gvol, err := genericListVolumeByID(ctx, volumeAPI, volData.volId)
 	if err != nil {
@@ -1541,7 +1550,11 @@ func (cs *ControllerServer) ControllerGetVolume(ctx context.Context, req *csi.Co
 			}, nil
 		}
 
-		klog.Warningf("[ControllerGetVolume] GetVolume(%s) failed with StatusCode(%d). err: %v", volumeID, resterr.StatusCode, err)
+		statusCode := 0
+		if ok {
+			statusCode = resterr.StatusCode
+		}
+		klog.Warningf("[ControllerGetVolume] GetVolume(%s) failed with StatusCode(%d). err: %v", volumeID, statusCode, err)
 		return &csi.ControllerGetVolumeResponse{
 			Volume: &csi.Volume{
 				VolumeId: volumeID,
