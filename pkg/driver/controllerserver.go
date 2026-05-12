@@ -31,6 +31,8 @@ type ControllerServer struct {
 }
 
 var convertVolTypeMutex sync.Mutex
+var cloneMonitorMutex sync.Mutex
+var cloneMonitorMap = map[string]struct{}{}
 
 // CreateVolume create a volume
 func (cs *ControllerServer) CreateVolume(ctx context.Context, req *csi.CreateVolumeRequest) (*csi.CreateVolumeResponse, error) {
@@ -287,9 +289,9 @@ func (cs *ControllerServer) CreateBlockVolume(ctx context.Context, req *csi.Crea
 				klog.Infof("[CreateBlockVolume] Restore capacityMB(%d) vs vol.TotalSize(%d)", capacityMB, vol.TotalSize)
 				if capacityMB > vol.TotalSize {
 					resizeVolSizeMB = capacityMB
-					go monitorCloneStatus(&VolumeWrapper{op: volumeAPI}, parentVolId, vol.ID, resizeVolSizeMB)
+					startMonitorCloneStatus(&VolumeWrapper{op: volumeAPI}, parentVolId, vol.ID, resizeVolSizeMB)
 				} else {
-					go monitorCloneStatus(&VolumeWrapper{op: volumeAPI}, parentVolId, vol.ID, 0)
+					startMonitorCloneStatus(&VolumeWrapper{op: volumeAPI}, parentVolId, vol.ID, 0)
 				}
 
 			} else {
@@ -328,9 +330,9 @@ func (cs *ControllerServer) CreateBlockVolume(ctx context.Context, req *csi.Crea
 			klog.Infof("[CreateBlockVolume] Clone capacityMB(%d) vs vol.TotalSize(%d)", capacityMB, vol.TotalSize)
 			if capacityMB > vol.TotalSize {
 				resizeVolSizeMB = capacityMB
-				go monitorCloneStatus(&VolumeWrapper{op: volumeAPI}, parentVolId, vol.ID, resizeVolSizeMB)
+				startMonitorCloneStatus(&VolumeWrapper{op: volumeAPI}, parentVolId, vol.ID, resizeVolSizeMB)
 			} else {
-				go monitorCloneStatus(&VolumeWrapper{op: volumeAPI}, parentVolId, vol.ID, 0)
+				startMonitorCloneStatus(&VolumeWrapper{op: volumeAPI}, parentVolId, vol.ID, 0)
 			}
 
 		default:
@@ -661,9 +663,9 @@ func (cs *ControllerServer) CreateFileVolume(ctx context.Context, req *csi.Creat
 				klog.Infof("[CreateFileVolume] Restore capacityMB(%d) vs vol.TotalSize(%d)", capacityMB, vol.TotalSize)
 				if capacityMB > vol.TotalSize {
 					resizeVolSizeMB = capacityMB
-					go monitorCloneStatus(&FileVolumeWrapper{op: volumeAPI}, parentVolId, vol.ID, resizeVolSizeMB)
+					startMonitorCloneStatus(&FileVolumeWrapper{op: volumeAPI}, parentVolId, vol.ID, resizeVolSizeMB)
 				} else {
-					go monitorCloneStatus(&FileVolumeWrapper{op: volumeAPI}, parentVolId, vol.ID, 0)
+					startMonitorCloneStatus(&FileVolumeWrapper{op: volumeAPI}, parentVolId, vol.ID, 0)
 				}
 
 			} else {
@@ -717,9 +719,9 @@ func (cs *ControllerServer) CreateFileVolume(ctx context.Context, req *csi.Creat
 			klog.Infof("[CreateFileVolume] Clone capacityMB(%d) vs vol.TotalSize(%d)", capacityMB, vol.TotalSize)
 			if capacityMB > vol.TotalSize {
 				resizeVolSizeMB = capacityMB
-				go monitorCloneStatus(&FileVolumeWrapper{op: volumeAPI}, parentVolId, vol.ID, resizeVolSizeMB)
+				startMonitorCloneStatus(&FileVolumeWrapper{op: volumeAPI}, parentVolId, vol.ID, resizeVolSizeMB)
 			} else {
-				go monitorCloneStatus(&FileVolumeWrapper{op: volumeAPI}, parentVolId, vol.ID, 0)
+				startMonitorCloneStatus(&FileVolumeWrapper{op: volumeAPI}, parentVolId, vol.ID, 0)
 			}
 
 		default:
@@ -1299,21 +1301,9 @@ func (cs *ControllerServer) ControllerPublishFileVolume(ctx context.Context, req
 	}
 	klog.Infof("[ControllerPublishFileVolume] volume data: %+v", gvol)
 
-	// var pvolName string
 	if strings.EqualFold(gvol.Type, "BACKUP") {
-		pvol, err := genericListVolumeByID(ctx, &FileVolumeWrapper{op: volumeAPI}, parentVolId)
-		if err != nil {
-			return nil, status.Errorf(codes.Internal, "Failed to get parent volume(%s) of Backup Volume(%s). err: %v", parentVolId, volumeID, err)
-		} else {
-			// pvolName = pvol.Name
-			if strings.EqualFold(pvol.State, "ONLINE") {
-				_, err = convertVolRAIDType(ctx, &FileVolumeWrapper{op: volumeAPI}, gvol.ID, resizeVolSizeMB)
-				if err != nil {
-					return nil, status.Errorf(codes.Internal, "convertVolRAIDType failed. err: %v", err)
-				}
-			} else {
-				return nil, status.Errorf(codes.Internal, "The parent volume(%s) of Volume(%s) is in abnormal state %s (%d percent)", pvol.ID, volumeID, pvol.State, pvol.Progress)
-			}
+		if gvol, _, err = completeFileCloneConversion(ctx, volumeAPI, parentVolId, gvol.ID, resizeVolSizeMB); err != nil {
+			return nil, status.Errorf(codes.Internal, "Failed to complete cloned volume(%s) conversion. err: %v", volumeID, err)
 		}
 	}
 
@@ -1328,12 +1318,24 @@ func (cs *ControllerServer) ControllerPublishFileVolume(ctx context.Context, req
 			klog.Infof("[ControllerPublishFileVolume] Volume(%s) share: %+v", volumeID, share)
 
 			if share.IsOrphan {
-				return nil, status.Errorf(codes.Internal, "Cloned share is not ready! volName(%s) shareName(%s)", gvol.Name, shareName)
-			} else {
-				count := strings.Count(shareName, "-")
-				if count > 6 {
-					return nil, status.Errorf(codes.Internal, "Cloned share name is not converted! volName(%s) shareName(%s)", gvol.Name, shareName)
+				volName := gvol.Name
+				if gvol, _, err = completeFileCloneConversion(ctx, volumeAPI, parentVolId, gvol.ID, resizeVolSizeMB); err != nil {
+					return nil, status.Errorf(codes.Internal, "Cloned share is not ready! volName(%s) shareName(%s). err: %v", volName, shareName, err)
 				}
+				if share, err = getShareFromFileVolume(ctx, volumeAPI, volData.volId); err != nil {
+					return nil, status.Errorf(codes.Internal, "Failed to getShareFromFileVolume for volumeID %s after clone conversion. err: %v", volumeID, err)
+				}
+				shareId = share.ID
+				shareName = share.Name
+				klog.Infof("[ControllerPublishFileVolume] Volume(%s) converted share: %+v", volumeID, share)
+				if share.IsOrphan {
+					return nil, status.Errorf(codes.Internal, "Cloned share is not ready! volName(%s) shareName(%s)", gvol.Name, shareName)
+				}
+			}
+
+			count := strings.Count(shareName, "-")
+			if count > 6 {
+				return nil, status.Errorf(codes.Internal, "Cloned share name is not converted! volName(%s) shareName(%s)", gvol.Name, shareName)
 			}
 		}
 	}
@@ -2133,7 +2135,94 @@ func validateCloneCondition(ctx context.Context, volumeAPI GenericVolumeInterfac
 	}
 }
 
+func completeFileCloneConversion(ctx context.Context, volumeAPI *goqsan.FileVolumeOp, parentVolId, volId string, resizeVolSizeMB uint64) (*genericVolumeData, *genericVolumeData, error) {
+	klog.Infof("[completeFileCloneConversion] parentVolId(%s) volId(%s) resizeVolSizeMB(%d) caller(%s)", parentVolId, volId, resizeVolSizeMB, getCallerFunctionName())
+
+	if err := waitForCloneMonitorExit(ctx, parentVolId, volId); err != nil {
+		return nil, nil, err
+	}
+
+	if parentVolId == "" {
+		return nil, nil, fmt.Errorf("parent volume ID is empty")
+	}
+
+	volumeWrapper := &FileVolumeWrapper{op: volumeAPI}
+	pvol, err := genericListVolumeByID(ctx, volumeWrapper, parentVolId)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to get parent volume(%s) of Backup Volume(%s). err: %v", parentVolId, volId, err)
+	}
+	if !strings.EqualFold(pvol.State, "ONLINE") {
+		return nil, pvol, fmt.Errorf("the parent volume(%s) of Volume(%s) is in abnormal state %s (%d percent)", pvol.ID, volId, pvol.State, pvol.Progress)
+	}
+
+	gvol, err := convertVolRAIDType(ctx, volumeWrapper, volId, resizeVolSizeMB)
+	if err != nil {
+		return nil, pvol, fmt.Errorf("convertVolRAIDType failed. err: %v", err)
+	}
+
+	if err := volumeWrapper.DeleteCloneTask(ctx, parentVolId); err != nil {
+		klog.Warningf("[completeFileCloneConversion] Failed to delete clone task of source volume(%s). err: %+v", parentVolId, err)
+	}
+
+	share, err := getShareFromFileVolume(ctx, volumeAPI, volId)
+	if err != nil {
+		return gvol, pvol, fmt.Errorf("getShareFromFileVolume(%s) failed. err: %v", volId, err)
+	}
+	if share.IsOrphan {
+		if _, err = convertOrphanShare(ctx, volumeAPI, share.ID, gvol.Name, pvol.Name); err != nil {
+			return gvol, pvol, fmt.Errorf("convertOrphanShare(%s) failed: %v", share.ID, err)
+		}
+	} else {
+		klog.Infof("[completeFileCloneConversion] Volume(%s) orphan share was already converted. %+v", volId, share)
+	}
+
+	return gvol, pvol, nil
+}
+
+func cloneMonitorKey(parentVolId, volId string) string {
+	return parentVolId + "/" + volId
+}
+
+func startMonitorCloneStatus(volumeAPI GenericVolumeInterface, parentVolId, volId string, resizeVolSizeMB uint64) {
+	key := cloneMonitorKey(parentVolId, volId)
+
+	cloneMonitorMutex.Lock()
+	if _, exists := cloneMonitorMap[key]; exists {
+		cloneMonitorMutex.Unlock()
+		klog.Warningf("[startMonitorCloneStatus] monitorCloneStatus is already running, parentVolId(%s) volId(%s)", parentVolId, volId)
+		return
+	}
+	cloneMonitorMap[key] = struct{}{}
+	cloneMonitorMutex.Unlock()
+
+	go monitorCloneStatus(volumeAPI, parentVolId, volId, resizeVolSizeMB)
+}
+
+func finishCloneMonitor(parentVolId, volId string) {
+	key := cloneMonitorKey(parentVolId, volId)
+
+	cloneMonitorMutex.Lock()
+	delete(cloneMonitorMap, key)
+	cloneMonitorMutex.Unlock()
+}
+
+func waitForCloneMonitorExit(ctx context.Context, parentVolId, volId string) error {
+	key := cloneMonitorKey(parentVolId, volId)
+
+	cloneMonitorMutex.Lock()
+	_, exists := cloneMonitorMap[key]
+	cloneMonitorMutex.Unlock()
+
+	if !exists {
+		return nil
+	}
+
+	return fmt.Errorf("monitorCloneStatus is still running, parentVolId(%s) volId(%s)", parentVolId, volId)
+}
+
 func monitorCloneStatus(volumeAPI GenericVolumeInterface, parentVolId, volId string, resizeVolSizeMB uint64) {
+	defer finishCloneMonitor(parentVolId, volId)
+
 	var lastProgress, deltaProgress int
 	var sleepSec time.Duration = time.Second * 10
 
@@ -2166,7 +2255,11 @@ func monitorCloneStatus(volumeAPI GenericVolumeInterface, parentVolId, volId str
 				klog.Infof("[monitorCloneStatus] The parent volume(%s) of Volume(%s) is currently initiating... %d %% (Sleep %v)", parentVolId, volId, pvol.Progress, sleepSec)
 
 			} else if strings.EqualFold(pvol.State, "ONLINE") {
-				gvol, _ := convertVolRAIDType(ctx, volumeAPI, volId, resizeVolSizeMB)
+				gvol, err := convertVolRAIDType(ctx, volumeAPI, volId, resizeVolSizeMB)
+				if err != nil {
+					klog.Warningf("[monitorCloneStatus] convertVolRAIDType(%s) failed: %v", volId, err)
+					break
+				}
 				if err := volumeAPI.DeleteCloneTask(ctx, parentVolId); err != nil {
 					klog.Warningf("[monitorCloneStatus] Failed to delete clone task of source volume(%s). err: %+v", parentVolId, err)
 				}
@@ -2206,22 +2299,23 @@ func convertVolRAIDType(ctx context.Context, volumeAPI GenericVolumeInterface, v
 
 	gvol, err := genericListVolumeByID(ctx, volumeAPI, volId)
 	if err != nil {
-		klog.Warningf("[convertVolRAIDType] volume(%s) not exist.", volId)
-	} else {
-		if strings.EqualFold(gvol.Type, "BACKUP") {
-			volType := "RAID"
-			_, err := genericModifyVolume(ctx, volumeAPI, volId, &volType, resizeVolSizeMB)
-			if err != nil {
-				return nil, fmt.Errorf("Failed to convert volume(%s) from BACKUP type to RAID type. err: %+v", volId, err)
-			}
+		klog.Warningf("[convertVolRAIDType] volume(%s) not exist. err: %v", volId, err)
+		return nil, err
+	}
 
-			klog.Infof("[convertVolRAIDType] Convert volume(%s) from BACKUP type to RAID type.", volId)
-			if resizeVolSizeMB > 0 {
-				klog.Infof("[convertVolRAIDType] Extend volume(%s) size to %d MB.", volId, resizeVolSizeMB)
-			}
-		} else {
-			klog.Infof("[convertVolRAIDType] volume(%s) is already RAID type.", volId)
+	if strings.EqualFold(gvol.Type, "BACKUP") {
+		volType := "RAID"
+		gvol, err = genericModifyVolume(ctx, volumeAPI, volId, &volType, resizeVolSizeMB)
+		if err != nil {
+			return nil, fmt.Errorf("Failed to convert volume(%s) from BACKUP type to RAID type. err: %+v", volId, err)
 		}
+
+		klog.Infof("[convertVolRAIDType] Convert volume(%s) from BACKUP type to RAID type.", volId)
+		if resizeVolSizeMB > 0 {
+			klog.Infof("[convertVolRAIDType] Extend volume(%s) size to %d MB.", volId, resizeVolSizeMB)
+		}
+	} else {
+		klog.Infof("[convertVolRAIDType] volume(%s) is already RAID type.", volId)
 	}
 
 	return gvol, nil
