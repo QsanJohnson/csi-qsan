@@ -834,22 +834,27 @@ func mapIscsiPortalsToTargets(ctx context.Context, authClient *goqsan.AuthClient
 	return m, nil
 }
 
-func getFcWwnByTName(ctx context.Context, authClient *goqsan.AuthClient, tname string) (string, error) {
+func getFcWwnByTName(ctx context.Context, authClient *goqsan.AuthClient, tname string) ([]string, error) {
 	targetAPI := goqsan.NewTarget(authClient)
 	tgts, err := targetAPI.ListTargets(ctx, "")
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 
+	var wwns []string
 	for _, tgt := range *tgts {
 		if contains(fcTargetTypes, tgt.Type) && tgt.Name == tname {
 			for _, fc := range tgt.Fcp {
-				return strings.ToLower(fc.Wwn), nil
+				wwns = append(wwns, strings.ToLower(fc.Wwn))
 			}
 		}
 	}
 
-	return "", fmt.Errorf("[getFcWwnByTName] Target name(%s) is not found", tname)
+	if len(wwns) == 0 {
+		return nil, fmt.Errorf("[getFcWwnByTName] Target name(%s) is not found", tname)
+	}
+
+	return wwns, nil
 }
 
 func getLunDataByVolumeId(ctx context.Context, authClient *goqsan.AuthClient, volId string) (*goqsan.LunData, error) {

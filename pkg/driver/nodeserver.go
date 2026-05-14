@@ -276,18 +276,18 @@ func (ns *NodeServer) getVolumeDiskName(ctx context.Context, authClient *goqsan.
 		}
 
 	} else if protocol == protocolFC {
-		wwn, err := getFcWwnByTName(ctx, authClient, targetName)
+		wwns, err := getFcWwnByTName(ctx, authClient, targetName)
 		if err != nil {
 			return "", status.Error(codes.InvalidArgument, fmt.Sprintf("getFcWwnByTName(%s) failed: %v", targetName, err))
 		}
-		klog.Infof("[getVolumeDiskName] targetName(%s) --> wwn(%s)", targetName, wwn)
-		if wwn == "" {
+		klog.Infof("[getVolumeDiskName] targetName(%s) --> wwn(%+v)", targetName, wwns)
+		if len(wwns) == 0 {
 			return "", status.Error(codes.Internal, fmt.Sprintf("Cant not get WWN of target(%s)", targetName))
 		}
 
-		if diskName, err = ns.getFcDiskName(wwn, lun, multipathEnabled); err != nil {
+		if diskName, err = ns.getFcDiskName(wwns, lun, multipathEnabled); err != nil {
 			klog.Errorf("[getVolumeDiskName] FC disk(%s) is not ready", diskName)
-			return "", status.Error(codes.FailedPrecondition, fmt.Sprintf("getFcDiskName(%s, %d) failed: %v", wwn, lun, err))
+			return "", status.Error(codes.FailedPrecondition, fmt.Sprintf("getFcDiskName(%v, %d) failed: %v", wwns, lun, err))
 		}
 	}
 
@@ -339,28 +339,37 @@ func (ns *NodeServer) getIscsiDiskName(targetMap map[string]string, lun uint64, 
 	}
 }
 
-func (ns *NodeServer) getFcDiskName(wwn string, lun uint64, multipathEnabled bool) (string, error) {
+func (ns *NodeServer) getFcDiskName(wwns []string, lun uint64, multipathEnabled bool) (string, error) {
 	fc := &gofc.FCUtil{Opts: gofc.FCOptions{ForceMPIO: multipathEnabled}}
-	disk, err := fc.GetDisk(wwn, lun)
-	if err != nil {
-		return "", fmt.Errorf("get FC disk(%s, %d) failed: %v", wwn, lun, err)
-	}
-	klog.V(2).Infof("[getFcDiskName] Get disk: %+v", disk)
-	for name, dev := range disk.Devices {
-		klog.V(4).Infof("  %s: %+v\n", name, dev)
+	var errs []string
+	var lastDiskName string
+
+	for _, wwn := range wwns {
+		disk, err := fc.GetDisk(wwn, lun)
+		if err != nil {
+			errs = append(errs, fmt.Sprintf("get FC disk(%s, %d) failed: %v", wwn, lun, err))
+			continue
+		}
+		klog.V(2).Infof("[getFcDiskName] Get disk by wwn(%s): %+v", wwn, disk)
+		for name, dev := range disk.Devices {
+			klog.V(4).Infof("  %s: %+v\n", name, dev)
+		}
+
+		diskName := disk.Name
+		lastDiskName = diskName
+		diskValid := disk.Valid
+		if disk.Status == "offline" {
+			diskValid = false
+		}
+
+		if diskValid {
+			return diskName, nil
+		}
+
+		errs = append(errs, fmt.Sprintf("FC disk(%s, %d) is invalid: %+v", wwn, lun, disk))
 	}
 
-	diskName := disk.Name
-	diskValid := disk.Valid
-	if disk.Status == "offline" {
-		diskValid = false
-	}
-
-	if diskValid {
-		return diskName, nil
-	} else {
-		return diskName, fmt.Errorf("FC disk is invalid: %+v", disk)
-	}
+	return lastDiskName, fmt.Errorf("no valid FC disk found for WWNs(%v): %s", wwns, strings.Join(errs, "; "))
 }
 
 // NodeUnstageVolume unstage volume

@@ -217,18 +217,21 @@ func (cs *ControllerServer) CreateBlockVolume(ctx context.Context, req *csi.Crea
 		}
 
 		multipathEnabled = true
-		wwn, err := getFcWwnByTName(ctx, authClient, targetName)
+		wwns, err := getFcWwnByTName(ctx, authClient, targetName)
 		if err != nil {
 			return nil, status.Error(codes.InvalidArgument, fmt.Sprintf("%s(%s) is not exist at server %s", paramTarget, targetName, server))
 		}
 
-		klog.Infof("[CreateBlockVolume] targetName(%s) --> wwn(%s)", targetName, wwn)
+		klog.Infof("[CreateBlockVolume] targetName(%s) --> wwn(%+v)", targetName, wwns)
 		for _, topology := range preferredAccessibility {
 			// klog.Infof("[CreateVolume] no: %d, topology: %+v", no, topology)
 			// klog.Infof("[CreateVolume] Segments: %+v", topology.Segments)
-			if strings.Contains(topology.Segments["topology.qsan.com/fc"], wwn) {
-				// klog.Infof("[CreateVolume] FOUND: %s", topology.Segments["topology.qsan.com/fc"])
-				topologies = append(topologies, topology)
+			for _, wwn := range wwns {
+				if strings.Contains(topology.Segments["topology.qsan.com/fc"], wwn) {
+					// klog.Infof("[CreateVolume] FOUND: %s", topology.Segments["topology.qsan.com/fc"])
+					topologies = append(topologies, topology)
+					break
+				}
 			}
 		}
 
@@ -250,12 +253,12 @@ func (cs *ControllerServer) CreateBlockVolume(ctx context.Context, req *csi.Crea
 
 	var resizeVolSizeMB uint64
 	capacityBytes := reqCapacity
-	volSizeMB := (reqCapacity + (1<<20) - 1) >> 20
+	volSizeMB := (reqCapacity + (1 << 20) - 1) >> 20
 	if volSizeMB == 0 {
 		volSizeMB = 1
 		klog.Infof("[CreateBlockVolume] Set volSizeMB to 1. reqCapacity(%v)", reqCapacity)
 	} else if (volSizeMB * 1024 * 1024) != reqCapacity {
-		klog.Infof("[CreateBlockVolume] reqCapacity(%v) ==> volSize(%v)", reqCapacity, volSizeMB * 1024 * 1024)
+		klog.Infof("[CreateBlockVolume] reqCapacity(%v) ==> volSize(%v)", reqCapacity, volSizeMB*1024*1024)
 	}
 
 	volumeAPI := goqsan.NewVolume(authClient)
@@ -603,7 +606,7 @@ func (cs *ControllerServer) CreateFileVolume(ctx context.Context, req *csi.Creat
 		}
 	}
 
-	poolId, provision, dedupEnabled,err := getPoolIDProvByName(ctx, authClient, pool)
+	poolId, provision, dedupEnabled, err := getPoolIDProvByName(ctx, authClient, pool)
 	if err != nil {
 		klog.Warningf("[CreateFileVolume] getPoolIDProvByName failed, err: %v", err)
 		return nil, status.Error(codes.InvalidArgument, fmt.Sprintf("%s(%s) is not exist at server %s", paramPool, pool, server))
@@ -621,14 +624,14 @@ func (cs *ControllerServer) CreateFileVolume(ctx context.Context, req *csi.Creat
 
 	var resizeVolSizeMB uint64
 	capacityBytes := reqCapacity
-	volSizeGB := (reqCapacity + (1<<30) - 1) >> 30
+	volSizeGB := (reqCapacity + (1 << 30) - 1) >> 30
 	volSizeMB := volSizeGB << 10
 	// volSizeMB := (reqCapacity + (1<<20) - 1) >> 20
 	if volSizeMB == 0 {
 		volSizeMB = 1
 		klog.Infof("[CreateFileVolume] Set volSizeMB to 1. reqCapacity(%v)", reqCapacity)
 	} else if (volSizeMB * 1024 * 1024) != reqCapacity {
-		klog.Infof("[CreateFileVolume] reqCapacity(%v) ==> volSize(%v)", reqCapacity, volSizeMB * 1024 * 1024)
+		klog.Infof("[CreateFileVolume] reqCapacity(%v) ==> volSize(%v)", reqCapacity, volSizeMB*1024*1024)
 	}
 
 	volumeAPI := goqsan.NewFileVolume(authClient)
@@ -795,7 +798,7 @@ func (cs *ControllerServer) CreateFileVolume(ctx context.Context, req *csi.Creat
 						}
 					}
 				}
-				
+
 				return nil, status.Error(codes.Internal, err.Error())
 			}
 
@@ -989,11 +992,11 @@ RETRY:
 				klog.Infof("[DeleteBlockVolume] volumeID %s not exist.", volumeID)
 				return &csi.DeleteVolumeResponse{}, nil
 			} else if resterr.ErrResp.Error.Code == goqsan.QERR_LVMERR_VD_ALREADY_DELETE_V2 ||
-					resterr.ErrResp.Error.Code == goqsan.QERR_LVMERR_VD_ALREADY_DELETE_V1 {
+				resterr.ErrResp.Error.Code == goqsan.QERR_LVMERR_VD_ALREADY_DELETE_V1 {
 				klog.Warningf("[DeleteBlockVolume] volumeID %s was already deleted.", volumeID)
 				return &csi.DeleteVolumeResponse{}, nil
 			} else if resterr.ErrResp.Error.Code == goqsan.QERR_LVMERR_VD_ALREADY_ATTACHED_V2 ||
-					resterr.ErrResp.Error.Code == goqsan.QERR_LVMERR_VD_ALREADY_ATTACHED_V1 {
+				resterr.ErrResp.Error.Code == goqsan.QERR_LVMERR_VD_ALREADY_ATTACHED_V1 {
 				// Check if has LUN attached. If yes, detach it then delete volume again
 				vol, err := volumeAPI.ListVolumeByID(ctx, volData.volId)
 				if err == nil && vol.TargetID != "" {
@@ -1075,7 +1078,7 @@ RETRY:
 				klog.Infof("[DeleteFileVolume] volumeID %s not exist.", volumeID)
 				return &csi.DeleteVolumeResponse{}, nil
 			} else if resterr.ErrResp.Error.Code == goqsan.QERR_LVMERR_VD_ALREADY_DELETE_V2 ||
-					resterr.ErrResp.Error.Code == goqsan.QERR_LVMERR_VD_ALREADY_DELETE_V1 {
+				resterr.ErrResp.Error.Code == goqsan.QERR_LVMERR_VD_ALREADY_DELETE_V1 {
 				klog.Warningf("[DeleteFileVolume] volumeID %s was already deleted.", volumeID)
 				return &csi.DeleteVolumeResponse{}, nil
 			} else if ok && resterr.StatusCode == http.StatusNotFound {
@@ -1204,7 +1207,7 @@ RETRY:
 		lun, err = targetAPI.MapLun(ctx, tgtID, volData.volId, &paramMLun)
 		if err != nil {
 			resterr, ok := err.(*goqsan.RestError)
-			if ok && resterr.StatusCode == http.StatusForbidden && 
+			if ok && resterr.StatusCode == http.StatusForbidden &&
 				(resterr.ErrResp.Error.Code == goqsan.QERR_UIERR_LUN_MAX_LIMIT_V2 || resterr.ErrResp.Error.Code == goqsan.QERR_UIERR_LUN_MAX_LIMIT_V1) {
 				return nil, status.Error(codes.ResourceExhausted, err.Error())
 			} else if ok && resterr.StatusCode == http.StatusTooManyRequests {
@@ -1796,7 +1799,7 @@ RETRY:
 				}
 			}
 		}
-		
+
 		return nil, status.Error(codes.Internal, fmt.Sprintf("CreateSnapshot failed: %v", err))
 	}
 
@@ -2019,10 +2022,10 @@ func (cs *ControllerServer) ControllerExpandVolume(ctx context.Context, req *csi
 	}
 
 	reqCapacity := req.GetCapacityRange().GetRequiredBytes()
-	volSizeMB := (reqCapacity + (1<<20) - 1) >> 20
+	volSizeMB := (reqCapacity + (1 << 20) - 1) >> 20
 	klog.Infof("[ControllerExpandVolume] volumeID: %s, reqCapacity: %d", volumeID, reqCapacity)
 	if (volSizeMB * 1024 * 1024) != reqCapacity {
-		klog.Infof("[ControllerExpandVolume] reqCapacity(%v) ==> volSize(%v)", reqCapacity, volSizeMB * 1024 * 1024)
+		klog.Infof("[ControllerExpandVolume] reqCapacity(%v) ==> volSize(%v)", reqCapacity, volSizeMB*1024*1024)
 	}
 
 	volData, err := cs.Driver.GetContextDataFromVolumeContextID(volumeID)
