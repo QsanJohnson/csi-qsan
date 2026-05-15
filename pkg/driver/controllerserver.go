@@ -1294,7 +1294,8 @@ func (cs *ControllerServer) ControllerPublishFileVolume(ctx context.Context, req
 	}
 
 	volumeAPI := goqsan.NewFileVolume(authClient)
-	gvol, err := genericListVolumeByID(ctx, &FileVolumeWrapper{op: volumeAPI}, volData.volId)
+	volumeWrapper := &FileVolumeWrapper{op: volumeAPI}
+	gvol, err := genericListVolumeByID(ctx, volumeWrapper, volData.volId)
 	if err != nil {
 		resterr, ok := err.(*goqsan.RestError)
 		if ok && resterr.StatusCode == http.StatusNotFound {
@@ -1304,8 +1305,9 @@ func (cs *ControllerServer) ControllerPublishFileVolume(ctx context.Context, req
 	}
 	klog.Infof("[ControllerPublishFileVolume] volume data: %+v", gvol)
 
+	var pvol *genericVolumeData
 	if strings.EqualFold(gvol.Type, "BACKUP") {
-		if gvol, _, err = completeFileCloneConversion(ctx, volumeAPI, parentVolId, gvol.ID, resizeVolSizeMB); err != nil {
+		if gvol, pvol, err = completeFileCloneConversion(ctx, volumeAPI, parentVolId, gvol.ID, resizeVolSizeMB); err != nil {
 			return nil, status.Errorf(codes.Internal, "Failed to complete cloned volume(%s) conversion. err: %v", volumeID, err)
 		}
 	}
@@ -1322,7 +1324,7 @@ func (cs *ControllerServer) ControllerPublishFileVolume(ctx context.Context, req
 
 			if share.IsOrphan {
 				volName := gvol.Name
-				if gvol, _, err = completeFileCloneConversion(ctx, volumeAPI, parentVolId, gvol.ID, resizeVolSizeMB); err != nil {
+				if gvol, pvol, err = completeFileCloneConversion(ctx, volumeAPI, parentVolId, gvol.ID, resizeVolSizeMB); err != nil {
 					return nil, status.Errorf(codes.Internal, "Cloned share is not ready! volName(%s) shareName(%s). err: %v", volName, shareName, err)
 				}
 				if share, err = getShareFromFileVolume(ctx, volumeAPI, volData.volId); err != nil {
@@ -1338,7 +1340,20 @@ func (cs *ControllerServer) ControllerPublishFileVolume(ctx context.Context, req
 
 			count := strings.Count(shareName, "-")
 			if count > 6 {
-				return nil, status.Errorf(codes.Internal, "Cloned share name is not converted! volName(%s) shareName(%s)", gvol.Name, shareName)
+				if pvol == nil {
+					pvol, err = genericListVolumeByID(ctx, volumeWrapper, parentVolId)
+					if err != nil {
+						return nil, status.Errorf(codes.Internal, "Failed to get parent volume(%s) for cloned share conversion. volName(%s) shareName(%s). err: %v", parentVolId, gvol.Name, shareName, err)
+					}
+				}
+
+				klog.Infof("[ControllerPublishFileVolume] Modify share(%s) name from %s to %s", shareId, shareName, gvol.Name)
+				share, err = modifyClonedShare(ctx, volumeAPI, shareId, gvol.Name, pvol.Name, "ControllerPublishFileVolume")
+				if err != nil {
+					return nil, status.Errorf(codes.Internal, "Failed to modify cloned share name. volName(%s) shareName(%s). err: %v", gvol.Name, shareName, err)
+				}
+				shareId = share.ID
+				shareName = share.Name
 			}
 		}
 	}
@@ -2332,14 +2347,18 @@ func convertOrphanShare(ctx context.Context, volumeAPI *goqsan.FileVolumeOp, sha
 	}
 
 	klog.Infof("[convertOrphanShare] Recreate share and modify recreateShare(%s) name to %s", recreateShare.ID, volName)
+	return modifyClonedShare(ctx, volumeAPI, recreateShare.ID, volName, pvolName, "convertOrphanShare")
+}
+
+func modifyClonedShare(ctx context.Context, volumeAPI *goqsan.FileVolumeOp, shareId, volName, pvolName, logPrefix string) (*goqsan.ShareData, error) {
 	param := &goqsan.ShareModifyOptions{
 		Name:        volName,
 		Description: fmt.Sprintf("[CSI] NFS share for CSI cloned volume %s.\nParent volume is %s.", volName, pvolName),
 	}
-	share, err := volumeAPI.ModifyShare(ctx, recreateShare.ID, param)
+	share, err := volumeAPI.ModifyShare(ctx, shareId, param)
 	if err != nil {
-		klog.Warningf("[convertOrphanShare] ModifyShare(%s) failed: %v", recreateShare.ID, err)
-		return nil, status.Errorf(codes.Internal, "Failed to modify recreateShare name to %s. err: %v", volName, err)
+		klog.Warningf("[%s] ModifyShare(%s) failed: %v", logPrefix, shareId, err)
+		return nil, status.Errorf(codes.Internal, "Failed to modify share name to %s. err: %v", volName, err)
 	}
 
 	return share, nil
