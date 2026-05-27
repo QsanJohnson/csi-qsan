@@ -11,6 +11,8 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
+	"time"
 
 	"gitlab.qsan.com/sharedlibs-go/gofc"
 	"gitlab.qsan.com/sharedlibs-go/goiscsi"
@@ -317,26 +319,42 @@ func (ns *NodeServer) getIscsiDiskName(targetMap map[string]string, lun uint64, 
 		return "", fmt.Errorf("failed to login iSCSI %+v: %v", tgts, err)
 	}
 
-	disk, err := iscsi.GetDisk(tgts)
-	if err != nil {
-		return "", fmt.Errorf("get iSCSI disk failed: %v", err)
-	}
-	klog.V(2).Infof("[getIscsiDiskName] Get disk: %+v", disk)
-	for name, dev := range disk.Devices {
-		klog.V(2).Infof("  %s: %+v\n", name, dev)
+	maxAttempts := 1
+	if multipathEnabled {
+		maxAttempts = 3
 	}
 
-	diskName := disk.Name
-	diskValid := disk.Valid
-	if disk.Status == "offline" {
-		diskValid = false
+	var lastDiskName string
+	var lastErr error
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		disk, err := iscsi.GetDisk(tgts)
+		if err != nil {
+			lastErr = fmt.Errorf("get iSCSI disk failed: %v", err)
+		} else {
+			klog.V(2).Infof("[getIscsiDiskName] Get disk: %+v", disk)
+			for name, dev := range disk.Devices {
+				klog.V(2).Infof("  %s: %+v\n", name, dev)
+			}
+
+			lastDiskName = disk.Name
+			diskValid := disk.Valid
+			if disk.Status == "offline" {
+				diskValid = false
+			}
+			if diskValid {
+				return lastDiskName, nil
+			}
+
+			lastErr = fmt.Errorf("iSCSI disk is invalid: %+v", disk)
+		}
+
+		if attempt < maxAttempts {
+			klog.Warningf("[getIscsiDiskName] iSCSI disk not ready on attempt %d/%d, retry after settle: %v", attempt, maxAttempts, lastErr)
+			time.Sleep(1 * time.Second)
+		}
 	}
 
-	if diskValid {
-		return diskName, nil
-	} else {
-		return diskName, fmt.Errorf("iSCSI disk is invalid: %+v", disk)
-	}
+	return lastDiskName, lastErr
 }
 
 func (ns *NodeServer) getFcDiskName(wwns []string, lun uint64, multipathEnabled bool) (string, error) {
@@ -820,16 +838,34 @@ func (ns *NodeServer) NodeUnpublishVolume(ctx context.Context, req *csi.NodeUnpu
 // NodeGetInfo return info of the node on which this plugin is running
 
 func (ns *NodeServer) removeTargetPath(targetPath string) error {
+	removeInContainer := func() error {
+		if err := os.RemoveAll(targetPath); err != nil {
+			return fmt.Errorf("failed to remove targetPath(%s) in container namespace: %w", targetPath, err)
+		}
+		return nil
+	}
+
 	// Delete target path in container namespace for idempotency.
-	if err := os.RemoveAll(targetPath); err != nil {
-		return fmt.Errorf("failed to remove targetPath(%s) in container namespace, err: %v", targetPath, err)
+	// In some mount-propagation setups, container namespace cleanup can hit EBUSY
+	// even when the path is already unmounted in host namespace.
+	if err := removeInContainer(); err != nil {
+		if !errors.Is(err, syscall.EBUSY) {
+			return err
+		}
+		klog.Warningf("[removeTargetPath] container cleanup got EBUSY for %s, fallback to host namespace cleanup", targetPath)
 	}
 
 	// Also cleanup host namespace path when mountPropagation is not Bidirectional.
 	if output, err := ns.runInHostMountNamespace("rm", "-rf", targetPath); err != nil {
-		return fmt.Errorf("failed to remove targetPath(%s) in host namespace, err: %v", targetPath, err)
+		// return fmt.Errorf("failed to remove targetPath(%s) in host namespace, err: %v", targetPath, err)
+		return fmt.Errorf("failed to remove targetPath(%s) in host namespace: %w", targetPath, err)
 	} else if len(strings.TrimSpace(string(output))) > 0 {
 		klog.Infof("[removeTargetPath] host cleanup output: %s", strings.TrimSpace(string(output)))
+	}
+
+	// Retry container namespace cleanup after host namespace path is removed.
+	if err := removeInContainer(); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return err
 	}
 	return nil
 }

@@ -316,6 +316,59 @@ func (iscsi *ISCSIUtil) GetDisk(targets []*Target) (*Disk, error) {
 				flushMultipathDevice("/dev/" + name)
 			}
 		}
+
+		// Refresh once after flushing stale maps. Multipath may converge to a single
+		// valid dm device shortly after flush.
+		if refreshedMap, err := getDevices(sessions, targets); err == nil {
+			refreshDisk := &Disk{Devices: refreshedMap}
+			diskCnt, mpathCnt, runningCnt := 0, 0, 0
+			vendor, model, serial := "", "", ""
+			diskMatch := true
+			for name, dev := range refreshedMap {
+				switch dev.Type {
+				case "disk", "mo-disk":
+					diskCnt++
+					if vendor == "" {
+						vendor, model, serial = dev.Vendor, dev.Model, dev.Serial
+					} else if vendor != dev.Vendor || model != dev.Model || serial != dev.Serial {
+						diskMatch = false
+					}
+					if dev.State == "running" {
+						runningCnt++
+					}
+				case "mpath":
+					mpathCnt++
+					refreshDisk.Name = name
+					refreshDisk.Size = dev.Size
+				}
+			}
+			refreshDisk.DiskCnt = diskCnt
+			refreshDisk.MpathCnt = mpathCnt
+			if diskMatch {
+				refreshDisk.Vendor, refreshDisk.Model, refreshDisk.Serial = vendor, model, serial
+			}
+			if refreshDisk.MpathCnt == 1 && diskMatch {
+				refreshDisk.Valid = true
+			}
+			switch {
+			case refreshDisk.DiskCnt == 0:
+				refreshDisk.Status = "none"
+			case !diskMatch:
+				refreshDisk.Status = "mismatch"
+			case refreshDisk.Valid && runningCnt == len(targets):
+				refreshDisk.Status = "online"
+			case refreshDisk.Valid && runningCnt == 0:
+				refreshDisk.Status = "offline"
+			case refreshDisk.Valid && runningCnt < len(targets):
+				refreshDisk.Status = "degrade"
+			default:
+				refreshDisk.Status = "unknown"
+			}
+			klog.V(2).Infof("[GetDisk] Refreshed disk after flush: %+v", refreshDisk)
+			disk = refreshDisk
+		} else {
+			klog.Warningf("[GetDisk] Failed to refresh disk after flushing multipath maps: %v", err)
+		}
 	}
 
 	return disk, nil
