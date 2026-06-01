@@ -857,7 +857,6 @@ func (ns *NodeServer) removeTargetPath(targetPath string) error {
 
 	// Also cleanup host namespace path when mountPropagation is not Bidirectional.
 	if output, err := ns.runInHostMountNamespace("rm", "-rf", targetPath); err != nil {
-		// return fmt.Errorf("failed to remove targetPath(%s) in host namespace, err: %v", targetPath, err)
 		return fmt.Errorf("failed to remove targetPath(%s) in host namespace: %w", targetPath, err)
 	} else if len(strings.TrimSpace(string(output))) > 0 {
 		klog.Infof("[removeTargetPath] host cleanup output: %s", strings.TrimSpace(string(output)))
