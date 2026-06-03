@@ -1383,13 +1383,22 @@ func (ns *NodeServer) tryMountWithRDMA(
 }
 
 func (ns *NodeServer) formatDevice(fsType, devicePath string) error {
-	mkfsBin := "mkfs." + fsType
-	cmd := exec.Command(mkfsBin, "-F", devicePath)
+	mkfsBin, args := mkfsCommand(fsType, devicePath)
+	cmd := exec.Command(mkfsBin, args...)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
-		return fmt.Errorf("format device failed: %s -F %s: %w (output: %s)", mkfsBin, devicePath, err, strings.TrimSpace(string(output)))
+		return fmt.Errorf("format device failed: %s %s: %w (output: %s)", mkfsBin, strings.Join(args, " "), err, strings.TrimSpace(string(output)))
 	}
 	return nil
+}
+
+func mkfsCommand(fsType, devicePath string) (string, []string) {
+	mkfsBin := "mkfs." + fsType
+	forceFlag := "-F"
+	if fsType == "xfs" {
+		forceFlag = "-f"
+	}
+	return mkfsBin, []string{forceFlag, devicePath}
 }
 
 func (ns *NodeServer) hostNamespaceIsLikelyNotMountPoint(targetPath string) (bool, error) {
