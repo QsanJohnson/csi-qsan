@@ -156,6 +156,7 @@ func NewNodeServer(n *Driver /*, mounter mount.Interface*/) *NodeServer {
 			Interface: mount.New(""),
 			Exec:      exec.New(),
 		},
+		deviceMap: make(map[string]string),
 	}
 }
 
