@@ -28,9 +28,10 @@ import (
 
 // NodeServer driver
 type NodeServer struct {
-	Driver  *Driver
-	mutex   sync.Mutex
-	mounter *mount.SafeFormatAndMount
+	Driver    *Driver
+	mutex     sync.Mutex
+	mounter   *mount.SafeFormatAndMount
+	deviceMap map[string]string
 }
 
 // All protocols use host mount namespace in current non-Bidirectional architecture.
@@ -238,6 +239,8 @@ func (ns *NodeServer) stageBlockVolumeFilesystem(ctx context.Context, req *csi.N
 		}
 	}
 
+	ns.deviceMap[volumeID] = devPath
+	klog.V(2).Infof("[stageBlockVolumeFilesystem] Cache device mapping volumeID(%s) -> devPath(%s)", volumeID, devPath)
 	return &csi.NodeStageVolumeResponse{}, nil
 }
 
@@ -456,20 +459,27 @@ func (ns *NodeServer) NodeUnstageVolume(ctx context.Context, req *csi.NodeUnstag
 			return nil, status.Errorf(codes.Internal, "failed to unmount target %q: %v", stagingPath, err)
 		}
 
-		if volData.protocol == protocolISCSI {
-			iscsi := &goiscsi.ISCSIUtil{Opts: goiscsi.ISCSIOptions{Timeout: DefaultIscsiTimeout}}
-			if err := iscsi.RemoveDisk(devName); err != nil {
-				klog.Errorf("[NodeUnstageVolume] Remove device %s failed. err: %v", devName, err)
-			}
-		} else if volData.protocol == protocolFC {
-			fc := &gofc.FCUtil{}
-			if err := fc.RemoveDisk(devName); err != nil {
-				klog.Errorf("[NodeUnstageVolume] Remove device %s failed. err: %v", devName, err)
-			}
+		if err := ns.removeProtocolDevice(volumeID, volData.protocol, devName, "[NodeUnstageVolume]"); err != nil {
+			return nil, status.Error(codes.Internal, err.Error())
 		}
 
 	} else {
-		klog.Warningf("[NodeUnstageVolume] stagingPath(%s) not unmounted", stagingPath)
+		klog.Warningf("[NodeUnstageVolume] stagingPath(%s) not mounted", stagingPath)
+
+		devName := ns.deviceMap[volumeID]
+		if devName == "" {
+			var derr error
+			devName, derr = GetDeviceNameFromTargetPath(stagingPath)
+			if derr != nil {
+				klog.Warningf("[NodeUnstageVolume] Unable to infer device from stagingPath(%s): %v", stagingPath, derr)
+				return &csi.NodeUnstageVolumeResponse{}, nil
+			}
+		}
+
+		klog.Infof("[NodeUnstageVolume] Infer device from stagingPath, devName(%s)", devName)
+		if err := ns.removeProtocolDevice(volumeID, volData.protocol, devName, "[NodeUnstageVolume]"); err != nil {
+			return nil, status.Error(codes.Internal, err.Error())
+		}
 	}
 
 	return &csi.NodeUnstageVolumeResponse{}, nil
@@ -566,13 +576,14 @@ func (ns *NodeServer) publishBlockVolume(ctx context.Context, req *csi.NodePubli
 			return nil, status.Error(codes.Internal, fmt.Sprintf("error checking host mountpoint path %s: %v", targetPath, err))
 		}
 	}
+	devPath := "/dev/" + diskName
 	if !notMnt {
 		// It's already mounted.
-		klog.Infof("Skipping bind-mounting subpath %s: already mounted", targetPath)
+		ns.deviceMap[volumeID] = devPath
+		klog.Infof("[publishBlockVolume] targetPath(%s) already mounted; cache device mapping volumeID(%s) -> devPath(%s)", targetPath, volumeID, devPath)
 		return &csi.NodePublishVolumeResponse{}, nil
 	}
 
-	devPath := "/dev/" + diskName
 	options := []string{"bind"}
 	klog.Infof("[publishBlockVolume] volumeID(%v) devPath(%s) targetPath(%s) mountflags(%v)", volumeID, devPath, targetPath, options)
 	if isHostNamespace {
@@ -582,6 +593,9 @@ func (ns *NodeServer) publishBlockVolume(ctx context.Context, req *csi.NodePubli
 	} else if err := ns.mounter.Mount(devPath, targetPath, "", options); err != nil {
 		return nil, status.Error(codes.Internal, fmt.Sprintf("failed to mount devPath: %s to %s: %v", devPath, targetPath, err))
 	}
+
+	ns.deviceMap[volumeID] = devPath
+	klog.Infof("[publishBlockVolume] Cache device mapping volumeID(%s) -> devPath(%s)", volumeID, devPath)
 
 	return &csi.NodePublishVolumeResponse{}, nil
 }
@@ -738,6 +752,11 @@ func (ns *NodeServer) NodeUnpublishVolume(ctx context.Context, req *csi.NodeUnpu
 	defer ns.mutex.Unlock()
 
 	if _, err := ns.Driver.GetContextDataFromVolumeContextID(volumeID); err == nil && isHostNamespace {
+		isBlockPublishPath := strings.Contains(targetPath, "/volumeDevices/publish/")
+		devName := ""
+		if isBlockPublishPath {
+			devName = ns.deviceMap[volumeID]
+		}
 		notMnt, err := ns.hostNamespaceIsLikelyNotMountPoint(targetPath)
 		if err != nil {
 			return nil, status.Errorf(codes.Internal, "Check host targetPath(%s) mount point failed: %v", targetPath, err)
@@ -747,7 +766,21 @@ func (ns *NodeServer) NodeUnpublishVolume(ctx context.Context, req *csi.NodeUnpu
 			if err := ns.removeTargetPath(targetPath); err != nil {
 				return nil, status.Error(codes.Internal, err.Error())
 			}
+			if isBlockPublishPath {
+				if err := ns.removeBlockDeviceIfUnused(volumeID, devName, "[NodeUnpublishVolume]"); err != nil {
+					return nil, status.Error(codes.Internal, err.Error())
+				}
+			}
 			return &csi.NodeUnpublishVolumeResponse{}, nil
+		}
+
+		if isBlockPublishPath {
+			mountSource, err := ns.hostNamespaceGetMountSource(targetPath)
+			if err != nil {
+				klog.Warningf("[NodeUnpublishVolume] failed to get host mount source(%s): %v", targetPath, err)
+			} else {
+				devName = mountSource
+			}
 		}
 
 		klog.Infof("[NodeUnpublishVolume] unmount volume %s from %s in host namespace", volumeID, targetPath)
@@ -755,6 +788,9 @@ func (ns *NodeServer) NodeUnpublishVolume(ctx context.Context, req *csi.NodeUnpu
 			return nil, status.Errorf(codes.Internal, "Failed to umount host targetPath(%s), err: %v", targetPath, err)
 		}
 		if err := ns.removeTargetPath(targetPath); err != nil {
+			return nil, status.Error(codes.Internal, err.Error())
+		}
+		if err := ns.removeBlockDeviceIfUnused(volumeID, devName, "[NodeUnpublishVolume]"); err != nil {
 			return nil, status.Error(codes.Internal, err.Error())
 		}
 		return &csi.NodeUnpublishVolumeResponse{}, nil
@@ -833,6 +869,84 @@ func (ns *NodeServer) NodeUnpublishVolume(ctx context.Context, req *csi.NodeUnpu
 	klog.Infof("[NodeUnpublishVolume] Volume ID %s has been unpublished.", volumeID)
 
 	return &csi.NodeUnpublishVolumeResponse{}, nil
+}
+
+func (ns *NodeServer) removeBlockDeviceIfUnused(volumeID, devName, logPrefix string) error {
+	if devName == "" || !strings.HasPrefix(devName, "/dev/") {
+		return nil
+	}
+
+	mountPoints, err := getBindMounts(filepath.Base(devName))
+	if err != nil {
+		klog.Warningf("%s getBindMounts(%s) failed, continue device cleanup. err: %v", logPrefix, filepath.Base(devName), err)
+	} else if len(mountPoints) > 0 {
+		klog.Infof("%s skip device cleanup for volumeID(%s), devName(%s) still has mount points: %+v", logPrefix, volumeID, devName, mountPoints)
+		return nil
+	}
+
+	volData, err := ns.Driver.GetContextDataFromVolumeContextID(volumeID)
+	if err != nil {
+		return fmt.Errorf("Failed to get volume context data from Volume ID %s: %v", volumeID, err)
+	}
+
+	return ns.removeProtocolDevice(volumeID, volData.protocol, devName, logPrefix)
+}
+
+func (ns *NodeServer) removeProtocolDevice(volumeID, protocol, devName, logPrefix string) error {
+	if devName == "" || !strings.HasPrefix(devName, "/dev/") {
+		return nil
+	}
+	if !blockDeviceExists(devName) {
+		klog.Infof("%s device %s already removed; skip cleanup for volumeID(%s)", logPrefix, devName, volumeID)
+		delete(ns.deviceMap, volumeID)
+		return nil
+	}
+
+	if protocol == protocolISCSI {
+		iscsi := &goiscsi.ISCSIUtil{Opts: goiscsi.ISCSIOptions{Timeout: DefaultIscsiTimeout}}
+		if err := iscsi.RemoveDisk(devName); err != nil {
+			if !blockDeviceExists(devName) {
+				klog.Infof("%s device %s disappeared during iSCSI cleanup; treat as already removed for volumeID(%s)", logPrefix, devName, volumeID)
+				delete(ns.deviceMap, volumeID)
+				return nil
+			}
+			klog.Errorf("%s Remove iSCSI device %s failed. err: %v", logPrefix, devName, err)
+			return fmt.Errorf("failed to remove iSCSI device %q: %v", devName, err)
+		}
+		delete(ns.deviceMap, volumeID)
+	} else if protocol == protocolFC {
+		fc := &gofc.FCUtil{}
+		if err := fc.RemoveDisk(devName); err != nil {
+			if !blockDeviceExists(devName) {
+				klog.Infof("%s device %s disappeared during FC cleanup; treat as already removed for volumeID(%s)", logPrefix, devName, volumeID)
+				delete(ns.deviceMap, volumeID)
+				return nil
+			}
+			klog.Errorf("%s Remove FC device %s failed. err: %v", logPrefix, devName, err)
+			return fmt.Errorf("failed to remove FC device %q: %v", devName, err)
+		}
+		delete(ns.deviceMap, volumeID)
+	}
+
+	return nil
+}
+
+func blockDeviceExists(devName string) bool {
+	if devName == "" || !strings.HasPrefix(devName, "/dev/") {
+		return false
+	}
+
+	resolved := devName
+	if target, err := filepath.EvalSymlinks(devName); err == nil {
+		resolved = target
+	}
+
+	base := filepath.Base(resolved)
+	if _, err := os.Stat(filepath.Join("/sys/block", base)); err == nil {
+		return true
+	}
+
+	return false
 }
 
 // NodeGetInfo return info of the node on which this plugin is running
