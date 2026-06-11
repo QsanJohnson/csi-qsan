@@ -106,7 +106,7 @@ func newGenericVolumeAPI(authClient *goqsan.AuthClient, protocol string) (volume
 		return &FileVolumeWrapper{op: fileVolumeAPI}, nil
 	}
 
-	blockVolumeAPI := goqsan.NewVolume(authClient)
+	blockVolumeAPI := newCachedVolumeOp(authClient)
 	if blockVolumeAPI == nil {
 		return nil, fmt.Errorf("failed to initialize QSAN block volume API for protocol %s", protocol)
 	}
@@ -379,7 +379,7 @@ func getPoolIDProvByName(ctx context.Context, authClient *goqsan.AuthClient, poo
 }
 
 func getBlockVolumeByName(ctx context.Context, authClient *goqsan.AuthClient, poolId, name string) (*goqsan.VolumeData, error) {
-	volumeAPI := goqsan.NewVolume(authClient)
+	volumeAPI := newCachedVolumeOp(authClient)
 	vols, err := volumeAPI.ListVolumesByPoolID(ctx, poolId)
 	if err != nil {
 		return nil, err
@@ -590,7 +590,7 @@ func getAllSnapshots(ctx context.Context, d *Driver) (map[string]*[]goqsan.Snaps
 	for ip, authClient := range d.qsan.authClient {
 		snapCnt, fsnapCnt := 0, 0
 
-		volumeAPI := goqsan.NewVolume(authClient)
+		volumeAPI := newCachedVolumeOp(authClient)
 		if vols, _ := volumeAPI.ListVolumes(ctx); vols != nil {
 			volSnapMap, cnt := collectSnapshotsForVolumes(
 				ctx, d, &VolumeWrapper{op: volumeAPI}, ip, vols,
@@ -858,7 +858,7 @@ func getFcWwnByTName(ctx context.Context, authClient *goqsan.AuthClient, tname s
 }
 
 func getLunDataByVolumeId(ctx context.Context, authClient *goqsan.AuthClient, volId string) (*goqsan.LunData, error) {
-	volumeAPI := goqsan.NewVolume(authClient)
+	volumeAPI := newCachedVolumeOp(authClient)
 	targetAPI := goqsan.NewTarget(authClient)
 	vol, err := volumeAPI.ListVolumeByID(ctx, volId)
 	if err != nil {
@@ -880,7 +880,7 @@ func getLunDataByVolumeId(ctx context.Context, authClient *goqsan.AuthClient, vo
 // checkAndEraseDevice erases thin volume at first time to avoid a dirty filesystem,
 // then clear NEP bit if erasing successful
 func checkAndEraseDevice(ctx context.Context, authClient *goqsan.AuthClient, volId, devPath, fsType string) (bool, error) {
-	volumeAPI := goqsan.NewVolume(authClient)
+	volumeAPI := newCachedVolumeOp(authClient)
 
 	// To prevent cancel from kubernetes, create a new context.
 	restCtx, cancel := context.WithTimeout(context.Background(), time.Second*180)

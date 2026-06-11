@@ -28,14 +28,39 @@ import (
 
 // NodeServer driver
 type NodeServer struct {
-	Driver    *Driver
-	mutex     sync.Mutex
-	mounter   *mount.SafeFormatAndMount
-	deviceMap map[string]string
+	Driver         *Driver
+	deviceMapMutex sync.Mutex
+	mounter        *mount.SafeFormatAndMount
+	deviceMap      map[string]string
 }
 
 // All protocols use host mount namespace in current non-Bidirectional architecture.
 var isHostNamespace = true
+
+func (ns *NodeServer) setDeviceMap(volumeID, devPath string) {
+	ns.deviceMapMutex.Lock()
+	defer ns.deviceMapMutex.Unlock()
+	ns.deviceMap[volumeID] = devPath
+}
+
+func (ns *NodeServer) getDeviceMap(volumeID string) string {
+	ns.deviceMapMutex.Lock()
+	defer ns.deviceMapMutex.Unlock()
+	return ns.deviceMap[volumeID]
+}
+
+func (ns *NodeServer) deleteDeviceMap(volumeID string) {
+	ns.deviceMapMutex.Lock()
+	defer ns.deviceMapMutex.Unlock()
+	delete(ns.deviceMap, volumeID)
+}
+
+func (ns *NodeServer) tryAcquireVolumeLock(volumeID, operation string) error {
+	if ns.Driver.volumeLocks.TryAcquire(volumeID) {
+		return nil
+	}
+	return status.Errorf(codes.Aborted, "%s for volume %s is already in progress", operation, volumeID)
+}
 
 // NodeStageVolume stage volume
 func (ns *NodeServer) NodeStageVolume(ctx context.Context, req *csi.NodeStageVolumeRequest) (*csi.NodeStageVolumeResponse, error) {
@@ -84,8 +109,10 @@ func (ns *NodeServer) stageBlockVolumeFilesystem(ctx context.Context, req *csi.N
 		return nil, status.Error(codes.Internal, err.Error())
 	}
 
-	ns.mutex.Lock()
-	defer ns.mutex.Unlock()
+	if err := ns.tryAcquireVolumeLock(volumeID, "NodeStageVolume"); err != nil {
+		return nil, err
+	}
+	defer ns.Driver.volumeLocks.Release(volumeID)
 
 	ctx = context.Background()
 	diskName, err := ns.getVolumeDiskName(ctx, authClient, req.GetPublishContext(), req.GetVolumeContext(), req.GetSecrets())
@@ -239,7 +266,7 @@ func (ns *NodeServer) stageBlockVolumeFilesystem(ctx context.Context, req *csi.N
 		}
 	}
 
-	ns.deviceMap[volumeID] = devPath
+	ns.setDeviceMap(volumeID, devPath)
 	klog.V(2).Infof("[stageBlockVolumeFilesystem] Cache device mapping volumeID(%s) -> devPath(%s)", volumeID, devPath)
 	return &csi.NodeStageVolumeResponse{}, nil
 }
@@ -414,8 +441,10 @@ func (ns *NodeServer) NodeUnstageVolume(ctx context.Context, req *csi.NodeUnstag
 	}
 
 	// default case: protocolISCSI and protocolFC
-	ns.mutex.Lock()
-	defer ns.mutex.Unlock()
+	if err := ns.tryAcquireVolumeLock(volumeID, "NodeUnstageVolume"); err != nil {
+		return nil, err
+	}
+	defer ns.Driver.volumeLocks.Release(volumeID)
 
 	notMount, err := ns.mounter.IsLikelyNotMountPoint(stagingPath)
 	if err != nil {
@@ -466,7 +495,7 @@ func (ns *NodeServer) NodeUnstageVolume(ctx context.Context, req *csi.NodeUnstag
 	} else {
 		klog.Warningf("[NodeUnstageVolume] stagingPath(%s) not mounted", stagingPath)
 
-		devName := ns.deviceMap[volumeID]
+		devName := ns.getDeviceMap(volumeID)
 		if devName == "" {
 			var derr error
 			devName, derr = GetDeviceNameFromTargetPath(stagingPath)
@@ -533,16 +562,15 @@ func (ns *NodeServer) publishBlockVolume(ctx context.Context, req *csi.NodePubli
 		return nil, status.Error(codes.Internal, err.Error())
 	}
 
-	ns.mutex.Lock()
-	defer ns.mutex.Unlock()
+	if err := ns.tryAcquireVolumeLock(volumeID, "NodePublishVolume"); err != nil {
+		return nil, err
+	}
+	defer ns.Driver.volumeLocks.Release(volumeID)
 
 	diskName, err := ns.getVolumeDiskName(ctx, authClient, req.GetPublishContext(), req.GetVolumeContext(), req.GetSecrets())
 	if err != nil {
 		return nil, err
 	}
-
-	// ns.mutex.Lock()
-	// defer ns.mutex.Unlock()
 
 	if volCap.GetAccessMode().GetMode() == csi.VolumeCapability_AccessMode_SINGLE_NODE_SINGLE_WRITER {
 		klog.Infof("[publishBlockVolume] Check diskName(%s) bind mount\n", diskName)
@@ -579,7 +607,7 @@ func (ns *NodeServer) publishBlockVolume(ctx context.Context, req *csi.NodePubli
 	devPath := "/dev/" + diskName
 	if !notMnt {
 		// It's already mounted.
-		ns.deviceMap[volumeID] = devPath
+		ns.setDeviceMap(volumeID, devPath)
 		klog.Infof("[publishBlockVolume] targetPath(%s) already mounted; cache device mapping volumeID(%s) -> devPath(%s)", targetPath, volumeID, devPath)
 		return &csi.NodePublishVolumeResponse{}, nil
 	}
@@ -594,7 +622,7 @@ func (ns *NodeServer) publishBlockVolume(ctx context.Context, req *csi.NodePubli
 		return nil, status.Error(codes.Internal, fmt.Sprintf("failed to mount devPath: %s to %s: %v", devPath, targetPath, err))
 	}
 
-	ns.deviceMap[volumeID] = devPath
+	ns.setDeviceMap(volumeID, devPath)
 	klog.Infof("[publishBlockVolume] Cache device mapping volumeID(%s) -> devPath(%s)", volumeID, devPath)
 
 	return &csi.NodePublishVolumeResponse{}, nil
@@ -748,14 +776,16 @@ func (ns *NodeServer) NodeUnpublishVolume(ctx context.Context, req *csi.NodeUnpu
 		return nil, status.Error(codes.InvalidArgument, "Target path missing in request")
 	}
 
-	ns.mutex.Lock()
-	defer ns.mutex.Unlock()
+	if err := ns.tryAcquireVolumeLock(volumeID, "NodeUnpublishVolume"); err != nil {
+		return nil, err
+	}
+	defer ns.Driver.volumeLocks.Release(volumeID)
 
 	if _, err := ns.Driver.GetContextDataFromVolumeContextID(volumeID); err == nil && isHostNamespace {
 		isBlockPublishPath := strings.Contains(targetPath, "/volumeDevices/publish/")
 		devName := ""
 		if isBlockPublishPath {
-			devName = ns.deviceMap[volumeID]
+			devName = ns.getDeviceMap(volumeID)
 		}
 		notMnt, err := ns.hostNamespaceIsLikelyNotMountPoint(targetPath)
 		if err != nil {
@@ -898,7 +928,7 @@ func (ns *NodeServer) removeProtocolDevice(volumeID, protocol, devName, logPrefi
 	}
 	if !blockDeviceExists(devName) {
 		klog.Infof("%s device %s already removed; skip cleanup for volumeID(%s)", logPrefix, devName, volumeID)
-		delete(ns.deviceMap, volumeID)
+		ns.deleteDeviceMap(volumeID)
 		return nil
 	}
 
@@ -907,25 +937,25 @@ func (ns *NodeServer) removeProtocolDevice(volumeID, protocol, devName, logPrefi
 		if err := iscsi.RemoveDisk(devName); err != nil {
 			if !blockDeviceExists(devName) {
 				klog.Infof("%s device %s disappeared during iSCSI cleanup; treat as already removed for volumeID(%s)", logPrefix, devName, volumeID)
-				delete(ns.deviceMap, volumeID)
+				ns.deleteDeviceMap(volumeID)
 				return nil
 			}
 			klog.Errorf("%s Remove iSCSI device %s failed. err: %v", logPrefix, devName, err)
 			return fmt.Errorf("failed to remove iSCSI device %q: %v", devName, err)
 		}
-		delete(ns.deviceMap, volumeID)
+		ns.deleteDeviceMap(volumeID)
 	} else if protocol == protocolFC {
 		fc := &gofc.FCUtil{}
 		if err := fc.RemoveDisk(devName); err != nil {
 			if !blockDeviceExists(devName) {
 				klog.Infof("%s device %s disappeared during FC cleanup; treat as already removed for volumeID(%s)", logPrefix, devName, volumeID)
-				delete(ns.deviceMap, volumeID)
+				ns.deleteDeviceMap(volumeID)
 				return nil
 			}
 			klog.Errorf("%s Remove FC device %s failed. err: %v", logPrefix, devName, err)
 			return fmt.Errorf("failed to remove FC device %q: %v", devName, err)
 		}
-		delete(ns.deviceMap, volumeID)
+		ns.deleteDeviceMap(volumeID)
 	}
 
 	return nil
@@ -1095,7 +1125,7 @@ func (ns *NodeServer) NodeGetVolumeStats(ctx context.Context, req *csi.NodeGetVo
 		gvol = convertToGenericVolumeData(vol)
 
 	} else {
-		volumeAPI := goqsan.NewVolume(authClient)
+		volumeAPI := newCachedVolumeOp(authClient)
 		vol, err := volumeAPI.ListVolumeByID(ctx, volData.volId)
 		if err != nil {
 			resterr, ok := err.(*goqsan.RestError)
@@ -1180,7 +1210,7 @@ func (ns *NodeServer) NodeExpandVolume(ctx context.Context, req *csi.NodeExpandV
 	if err != nil {
 		return nil, status.Error(codes.Internal, err.Error())
 	}
-	volumeAPI := goqsan.NewVolume(authClient)
+	volumeAPI := newCachedVolumeOp(authClient)
 	vol, err := volumeAPI.ListVolumeByID(ctx, volData.volId)
 	if err != nil {
 		resterr, ok := err.(*goqsan.RestError)

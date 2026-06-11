@@ -261,7 +261,7 @@ func (cs *ControllerServer) CreateBlockVolume(ctx context.Context, req *csi.Crea
 		klog.Infof("[CreateBlockVolume] reqCapacity(%v) ==> volSize(%v)", reqCapacity, volSizeMB*1024*1024)
 	}
 
-	volumeAPI := goqsan.NewVolume(authClient)
+	volumeAPI := newCachedVolumeOp(authClient)
 
 	var vol *goqsan.VolumeData
 	var parentVolId string
@@ -976,7 +976,7 @@ func (cs *ControllerServer) DeleteBlockVolume(ctx context.Context, volumeID stri
 	if err != nil {
 		return nil, status.Error(codes.Internal, err.Error())
 	}
-	volumeAPI := goqsan.NewVolume(authClient)
+	volumeAPI := newCachedVolumeOp(authClient)
 	vol, err := volumeAPI.ListVolumeByID(ctx, volData.volId)
 	if err == nil && vol.ReplicaTargetID != InvalidReplicaTargetID {
 		return nil, status.Error(codes.FailedPrecondition, fmt.Sprintf("Volume(%s) is a replica source and cannot be deleted. Current state: %s (%d percent)", volData.volId, vol.State, vol.Progress))
@@ -1147,7 +1147,7 @@ func (cs *ControllerServer) ControllerPublishBlockVolume(ctx context.Context, re
 		return nil, status.Error(codes.Internal, err.Error())
 	}
 
-	volumeAPI := &VolumeWrapper{op: goqsan.NewVolume(authClient)}
+	volumeAPI := &VolumeWrapper{op: newCachedVolumeOp(authClient)}
 	targetAPI := goqsan.NewTarget(authClient)
 
 	cs.mutexBLock.Lock()
@@ -1464,7 +1464,7 @@ func (cs *ControllerServer) ControllerUnpublishBlockVolume(ctx context.Context, 
 	if err != nil {
 		return nil, status.Error(codes.Internal, err.Error())
 	}
-	volumeAPI := goqsan.NewVolume(authClient)
+	volumeAPI := newCachedVolumeOp(authClient)
 
 	cs.mutexBLock.Lock()
 	defer cs.mutexBLock.Unlock()
@@ -1669,7 +1669,7 @@ func (cs *ControllerServer) ValidateVolumeCapabilities(ctx context.Context, req 
 	if volData.protocol == protocolNFS {
 		volumeAPI = &FileVolumeWrapper{op: goqsan.NewFileVolume(authClient)}
 	} else {
-		volumeAPI = &VolumeWrapper{op: goqsan.NewVolume(authClient)}
+		volumeAPI = &VolumeWrapper{op: newCachedVolumeOp(authClient)}
 	}
 	gvol, err := genericListVolumeByID(ctx, volumeAPI, volData.volId)
 	if err != nil {
@@ -1749,7 +1749,7 @@ func (cs *ControllerServer) CreateSnapshot(ctx context.Context, req *csi.CreateS
 	if volData.protocol == protocolNFS {
 		volumeAPI = &FileVolumeWrapper{op: goqsan.NewFileVolume(authClient)}
 	} else {
-		volumeAPI = &VolumeWrapper{op: goqsan.NewVolume(authClient)}
+		volumeAPI = &VolumeWrapper{op: newCachedVolumeOp(authClient)}
 	}
 
 	// Check if snapshot already exists.
@@ -1850,7 +1850,7 @@ func (cs *ControllerServer) DeleteSnapshot(ctx context.Context, req *csi.DeleteS
 	if snapData.protocol == protocolNFS {
 		volumeAPI = &FileVolumeWrapper{op: goqsan.NewFileVolume(authClient)}
 	} else {
-		volumeAPI = &VolumeWrapper{op: goqsan.NewVolume(authClient)}
+		volumeAPI = &VolumeWrapper{op: newCachedVolumeOp(authClient)}
 	}
 	if err := volumeAPI.DeleteSnapshot(ctx, snapData.volId, snapData.snapId, false); err != nil {
 		resterr, ok := err.(*goqsan.RestError)
@@ -1882,7 +1882,7 @@ func (cs *ControllerServer) ListSnapshots(ctx context.Context, req *csi.ListSnap
 				if snapData.protocol == protocolNFS {
 					volumeAPI = &FileVolumeWrapper{op: goqsan.NewFileVolume(authClient)}
 				} else {
-					volumeAPI = &VolumeWrapper{op: goqsan.NewVolume(authClient)}
+					volumeAPI = &VolumeWrapper{op: newCachedVolumeOp(authClient)}
 				}
 				if snapMap, _ := getSnapshotsByPoolID(ctx, volumeAPI, snapData.poolId); snapMap != nil {
 					for _, snaps := range snapMap {
@@ -1924,7 +1924,7 @@ func (cs *ControllerServer) ListSnapshots(ctx context.Context, req *csi.ListSnap
 				if volData.protocol == protocolNFS {
 					volumeAPI = &FileVolumeWrapper{op: goqsan.NewFileVolume(authClient)}
 				} else {
-					volumeAPI = &VolumeWrapper{op: goqsan.NewVolume(authClient)}
+					volumeAPI = &VolumeWrapper{op: newCachedVolumeOp(authClient)}
 				}
 				if snapMap, _ := getSnapshotsByPoolID(ctx, volumeAPI, volData.poolId); snapMap != nil {
 					for volId, snaps := range snapMap {
@@ -2073,7 +2073,7 @@ func (cs *ControllerServer) ControllerExpandVolume(ctx context.Context, req *csi
 	}
 
 	// default case: protocolISCSI and protocolFC
-	volumeAPI := goqsan.NewVolume(authClient)
+	volumeAPI := newCachedVolumeOp(authClient)
 	opts := &goqsan.VolumeModifyOptions{
 		TotalSize: uint64(volSizeMB),
 	}
