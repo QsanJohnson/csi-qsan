@@ -160,6 +160,7 @@ func (c *QsanClient) UpdateAuthClient(ctx context.Context, inbandIp, outbandIp s
 		} else {
 			klog.Infof("Update Qsan client management IP from %s to %s", inbandIp, outbandIp)
 			clearCachedVolumeOp(authClient)
+			clearCachedQsanModel(authClient)
 			c.authClient[inbandIp] = newAuthClient
 			return newAuthClient, nil
 		}
