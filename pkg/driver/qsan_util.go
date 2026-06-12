@@ -775,8 +775,13 @@ func getIscsiPortalsByTName(ctx context.Context, authClient *goqsan.AuthClient, 
 		ethIdArr = append(ethIdArr, ethIds...)
 	}
 
+	model, err := getCachedQsanModel(ctx, authClient)
+	if err != nil {
+		return nil, fmt.Errorf("[getIscsiPortalsByTName] getCachedQsanModel failed: %v", err)
+	}
+
 	networkAPI := goqsan.NewNetwork(authClient)
-	nics, err := networkAPI.ListNICs(ctx, "")
+	nics, err := networkAPI.ListNICs(ctx, model)
 	if err != nil {
 		return nil, fmt.Errorf("[getIscsiPortalsByTName] ListNICs failed: %v", err)
 	}
@@ -810,8 +815,13 @@ func mapIscsiPortalsToTargets(ctx context.Context, authClient *goqsan.AuthClient
 		return nil, fmt.Errorf("[mapIscsiPortalsToTargets] mapIscsiTargetToEthIds failed: %v", err)
 	}
 
+	model, err := getCachedQsanModel(ctx, authClient)
+	if err != nil {
+		return nil, fmt.Errorf("[mapIscsiPortalsToTargets] getCachedQsanModel failed: %v", err)
+	}
+
 	networkAPI := goqsan.NewNetwork(authClient)
-	nics, err := networkAPI.ListNICs(ctx, "")
+	nics, err := networkAPI.ListNICs(ctx, model)
 	if err != nil {
 		return nil, fmt.Errorf("[mapIscsiPortalsToTargets] ListNICs failed: %v", err)
 	}
@@ -1211,8 +1221,14 @@ func getShareFromFileVolume(ctx context.Context, volumeAPI *goqsan.FileVolumeOp,
 }
 
 func IsServerSupportRDMA(ctx context.Context, authClient *goqsan.AuthClient, ip string) bool {
+	model, err := getCachedQsanModel(ctx, authClient)
+	if err != nil {
+		klog.Warningf("[IsServerSupportRDMA] getCachedQsanModel failed: %v", err)
+		return false
+	}
+
 	networkAPI := goqsan.NewNetwork(authClient)
-	if nics, err := networkAPI.ListNICs(ctx, ""); err != nil {
+	if nics, err := networkAPI.ListNICs(ctx, model); err != nil {
 		klog.Warningf("[IsServerSupportRDMA] ListNICs failed, err: %v", err)
 		return false
 	} else {
