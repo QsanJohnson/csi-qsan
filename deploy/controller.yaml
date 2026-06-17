@@ -44,7 +44,7 @@ spec:
             - "--leader-election-namespace=qsan"
             - "--feature-gates=Topology=true"
             - "--strict-topology=true"
-            - "--timeout=60s"
+            - "--timeout=360s"
           securityContext:
             privileged: true
           env:
@@ -70,7 +70,7 @@ spec:
             - --csi-address=/csi/csi.sock
             - "--leader-election"
             - "--leader-election-namespace=qsan"
-            - "--timeout=120s"
+            - "--timeout=600s"
           securityContext:
             privileged: true
           volumeMounts:
@@ -83,7 +83,7 @@ spec:
             - -csi-address=/csi/csi.sock
             - "--leader-election"
             - "--leader-election-namespace=qsan"
-            - "--timeout=60s"
+            - "--timeout=360s"
           securityContext:
             privileged: true
           volumeMounts:
@@ -97,7 +97,7 @@ spec:
             - "--leader-election"
             - "--http-endpoint=:18080"
             - "--enable-node-watcher=true"
-            - "--timeout=60s"
+            - "--timeout=360s"
           env:
             - name: ADDRESS
               value: /csi/csi.sock

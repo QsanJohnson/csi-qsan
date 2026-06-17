@@ -131,7 +131,7 @@ func (c *QsanClient) GetnAddAuthClient(ctx context.Context, ip string) (*goqsan.
 	} else {
 		clientData := c.GetSecretData(ip)
 		if clientData != nil {
-			opt := goqsan.ClientOptions{ReqTimeout: 180 * time.Second, Https: clientData.Https, Port: clientData.Port}
+			opt := goqsan.ClientOptions{ReqTimeout: 300 * time.Second, Https: clientData.Https, Port: clientData.Port}
 			client := goqsan.NewClient(ip, opt)
 			klog.Infof("Add a Qsan client ip(%s) username(%s), password(%s), https(%v), port(%d)", ip, clientData.Username, clientData.Password, clientData.Https, clientData.Port)
 			authClient, err := client.GetAuthClient(ctx, clientData.Username, clientData.Password, goqsan.GetCSIScopes(clientData.Password))
@@ -151,7 +151,7 @@ func (c *QsanClient) UpdateAuthClient(ctx context.Context, inbandIp, outbandIp s
 
 	if authClient, ok := c.authClient[inbandIp]; ok {
 		clientData := c.GetSecretData(inbandIp)
-		opt := goqsan.ClientOptions{ReqTimeout: 180 * time.Second, Https: clientData.Https, Port: clientData.Port}
+		opt := goqsan.ClientOptions{ReqTimeout: 300 * time.Second, Https: clientData.Https, Port: clientData.Port}
 		client := goqsan.NewClient(outbandIp, opt)
 		newAuthClient, err := client.GetAuthClient(ctx, clientData.Username, clientData.Password, goqsan.GetCSIScopes(clientData.Password))
 		if err != nil {
