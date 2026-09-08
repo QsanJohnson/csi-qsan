@@ -51,6 +51,10 @@ func (cs *ControllerServer) CreateVolume(ctx context.Context, req *csi.CreateVol
 	klog.Infof("[CreateVolume] volumeName: %s ==> %s", req.GetName(), name)
 
 	parameters := req.GetParameters()
+	if err := validateQoSParameters(parameters); err != nil {
+		return nil, status.Error(codes.InvalidArgument, err.Error())
+	}
+
 	protocol, exists := parameters[strings.ToLower(paramProtocol)]
 	if exists {
 		if !contains(supportProtocols, protocol) {
@@ -74,6 +78,40 @@ func (cs *ControllerServer) CreateVolume(ctx context.Context, req *csi.CreateVol
 	} else {
 		return cs.CreateBlockVolume(ctx, req, protocol, name)
 	}
+}
+
+func validateQoSParameters(parameters map[string]string) error {
+	for key, value := range parameters {
+		switch strings.ToLower(key) {
+		case paramIoPriority, paramBgIoPriority:
+			if value != "HIGH" && value != "MEDIUM" && value != "LOW" {
+				return fmt.Errorf("invalid %s %q: must be HIGH, MEDIUM, or LOW", key, value)
+			}
+		case paramTargetRespmTime:
+			if err := validateUintParameter(key, value, 0, 10000); err != nil {
+				return err
+			}
+		case paramMaxIops:
+			if err := validateUintParameter(key, value, 10, 10000000); err != nil {
+				return err
+			}
+		case paramMaxThroughputKB:
+			if err := validateUintParameter(key, value, 50, 104857600); err != nil {
+				return err
+			}
+		}
+	}
+
+	return nil
+}
+
+func validateUintParameter(name, value string, min, max uint64) error {
+	parsed, err := strconv.ParseUint(value, 10, 64)
+	if err != nil || parsed < min || parsed > max {
+		return fmt.Errorf("invalid %s %q: must be an integer between %d and %d", name, value, min, max)
+	}
+
+	return nil
 }
 
 func (cs *ControllerServer) CreateBlockVolume(ctx context.Context, req *csi.CreateVolumeRequest, protocol, name string) (*csi.CreateVolumeResponse, error) {
@@ -435,11 +473,12 @@ func (cs *ControllerServer) CreateBlockVolume(ctx context.Context, req *csi.Crea
 				opts := &goqsan.VolumeModifyOptions{VolumeQoSOptions: qosOptions}
 				klog.Infof("[CreateBlockVolume] QoS qosOptions: %+v", opts)
 
-				vol, err = volumeAPI.ModifyVolume(ctx, vol.ID, opts)
-				if err == nil {
+				modifiedVol, modifyErr := volumeAPI.ModifyVolume(ctx, vol.ID, opts)
+				if modifyErr == nil {
+					vol = modifiedVol
 					klog.Infof("[CreateBlockVolume] QoS ModifyVolume: %+v", vol)
 				} else {
-					klog.Errorf("[CreateBlockVolume] Set volume(%s) QoS(%+v) failed: %+v", vol.ID, qosOptions, err)
+					klog.Warningf("[CreateBlockVolume] Ignore Set volume(%s) QoS(%+v) failure: %+v", vol.ID, qosOptions, modifyErr)
 				}
 			}
 		} else {
@@ -824,11 +863,12 @@ func (cs *ControllerServer) CreateFileVolume(ctx context.Context, req *csi.Creat
 				opts := &goqsan.FileVolumeModifyOptions{VolumeQoSOptions: qosOptions}
 				klog.Infof("[CreateFileVolume] QoS qosOptions: %+v", opts)
 
-				vol, err = volumeAPI.ModifyVolume(ctx, vol.ID, opts)
-				if err == nil {
+				modifiedVol, modifyErr := volumeAPI.ModifyVolume(ctx, vol.ID, opts)
+				if modifyErr == nil {
+					vol = modifiedVol
 					klog.Infof("[CreateFileVolume] QoS ModifyVolume: %+v", vol)
 				} else {
-					klog.Errorf("[CreateFileVolume] Set volume(%s) QoS(%+v) failed: %+v", vol.ID, qosOptions, err)
+					klog.Warningf("[CreateFileVolume] Ignore Set volume(%s) QoS(%+v) failure: %+v", vol.ID, qosOptions, modifyErr)
 				}
 			}
 
